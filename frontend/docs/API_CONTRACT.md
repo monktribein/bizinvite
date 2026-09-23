@@ -381,7 +381,7 @@ The backend must verify the JWT and extract `userId`, `organizationId`, and `rol
     }
   }
   ```
-- **Backend Responsibility**: Upon updating status to `attending` or `declined`, backend must cancel/suppress any queued reminder jobs for this guest in BullMQ/Redis (`reminderStatus = 'suppressed'`).
+- **Backend Responsibility**: Upon updating status to `attending` or `declined`, backend must cancel/suppress any pending reminder jobs for this guest (`reminderStatus = 'suppressed'`).
 
 ---
 
@@ -516,4 +516,48 @@ The backend must verify the JWT and extract `userId`, `organizationId`, and `rol
 ## 15. WhatsApp Inbound Webhooks (`/api/v1/webhooks/whatsapp`)
 - **Handled exclusively on the backend**.
 - Receives inbound Meta webhook payloads for message status updates (`sent`, `delivered`, `read`, `failed`), Quick Reply RSVP button clicks (`ACTION_RSVP_YES`, `ACTION_RSVP_NO`), and opt-out replies (`STOP`).
-- Backend mutates database records and triggers BullMQ worker jobs; the frontend displays updated figures via queries.
+- Backend mutates database records and schedules background jobs; the frontend displays updated figures via queries.
+
+---
+
+## 16. Backend Implementation Notes (v1.0.0)
+
+The backend in `backend/` implements this contract. The points below clarify or extend it; they do not change any
+documented shape. The full endpoint and permission list is in `backend/docs/API.md`.
+
+1. **Envelope.** Lists carry pagination in `meta` (§1.2). Default `limit` is 500 (max 1000) because the dashboard
+   paginates client-side; pass `page`/`limit` for server-side paging. Errors use `error.fields` for field messages
+   and may add `error.details` (for example `existingGuestId` on a duplicate guest). Success responses may include
+   a top-level `message`.
+2. **Guest ids.** `Guest.id` is the guest's *invitation to the event*; use it for `PATCH /guests/:id`,
+   `PATCH /rsvps/:guestId` and `POST /check-ins/manual`. `Guest.contactId` identifies the person across events.
+   Mobiles are normalized to E.164 (`+91…`). The same mobile twice on one event → `409 CONFLICT`.
+3. **Check-in outcomes** (§12) are always HTTP 200. The gate result is in `data.success`, `data.isDuplicate` and
+   `data.reason` (`DUPLICATE_CHECKIN`, `INVALID_PASS`, `REVOKED`, `EXPIRED`, `WRONG_EVENT`, `INVITATION_CANCELLED`).
+   `paxCount` above the remaining allowance admits only the remaining seats and says so in `message`.
+4. **Campaign launch** (§7). `POST /campaigns` without `scheduledFor` starts sending immediately (the dashboard's
+   "send now"); a future `scheduledFor` schedules it; `draft: true` only saves it. Additional endpoints:
+   `GET /campaigns/:id`, `PATCH /campaigns/:id`, `POST /campaigns/:id/send`, `POST /campaigns/:id/cancel`.
+   `metrics` also includes `pending`.
+5. **CSV import commit** (§6). Files of 500 rows or fewer return `200 { importedCount, updatedCount, ... }`.
+   Larger files return `202` with `status: "pending"`; poll `GET /imports/:id` until `completed`. Duplicates
+   without a resolution are skipped. Files: `.csv`, ≤ 5 MB, ≤ 20,000 rows.
+6. **RSVP** (§8). `count` includes the guest and may not exceed `1 + allowedCompanions` (`422`). Requirement
+   fields are stored only when the event enables them in `rsvpConfig` (`collectDietary`, `collectAccommodation`,
+   `collectTransport`, `collectArrivalDetails`, `collectSpecialRequests`); others are ignored and named in the
+   response `message`. RSVP status also accepts `cancelled`.
+7. **Reminder rules** (§9). `requiresApproval: true` creates the rule as `draft`; approve it with
+   `POST /reminder-rules/:id/activate` (pause with `/pause`). `maximumAttempts` defaults to 3.
+   `fallbackChannel: "sms"` is stored but SMS is not sent in the MVP.
+8. **Passes** (§11). Also available: `POST /passes/generate { eventId, guestIds?, onlyAttending }`,
+   `POST /passes/validate`, `POST /passes/:id/reissue`, `GET /passes/:id/qr` (PNG). `resend` queues delivery (message
+   "Pass queued for WhatsApp delivery") and requires `event.communication.passTemplateId`. `qrPayloadUrl` is a public
+   PNG of the signed QR.
+9. **Reports** (§13). `eventId` is optional (empty = all events). Export types: `full_event_summary`,
+   `invitation_funnel`, `rsvp_breakdown`, `gate_attendance`, `reminder_conversions`, `delivery_failures`,
+   `guest_list`; `format=xlsx` (default) or `csv`. The funnel has no "clicked" stage because WhatsApp does not report one.
+10. **Billing** (§14). `conversationsUsedThisMonth` counts billable WhatsApp template messages sent this month
+    (Meta bills per message); `estimatedSpendInr` is an estimate.
+11. **Templates** (§7). Additional: `POST /templates/sync` (pull from Meta) and `PATCH /templates/:id` (bind
+    `variables` to fields such as `guest_name`, `event_name`, `event_date`). Only `APPROVED` templates with every
+    variable bound can be sent (`400 TEMPLATE_NOT_APPROVED` / `422`).

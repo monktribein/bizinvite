@@ -112,7 +112,7 @@ The CSV Import Wizard operates in a two-phase workflow:
 1. **Preview Phase (`POST /api/v1/imports/guests/preview`)**:
    - Frontend sends a `multipart/form-data` request with the `file` field containing the raw `.csv` upload.
    - The backend parses the headers, auto-maps them to target fields (`name`, `mobile`, `category`, `isVip`, etc.), validates phone numbers and email syntax, checks for duplicates against the MongoDB database, and returns:
-     - `importId` (ephemeral Redis session ID)
+     - `importId` (id of the stored import preview; previews expire after 24 hours)
      - `totalRows`, `validRows`, `errorRows`, `duplicateCount`
      - `columnMappings`
      - `previewRows` (first 5 rows)
@@ -142,8 +142,8 @@ WhatsApp conversations and replies run via Meta Cloud API webhooks:
 - Inbound endpoint: `POST /api/v1/webhooks/whatsapp`
 - When a guest clicks Quick Reply button `ACTION_RSVP_YES` or `ACTION_RSVP_NO`:
   1. Backend updates the guest's `rsvpStatus` in MongoDB (`attending` / `declined`).
-  2. Backend **immediately cancels** pending BullMQ reminder delay jobs for that guest (`reminderStatus = 'suppressed'`).
-  3. When the dashboard next refetches or polls `/api/v1/rsvps` or `/dashboard`, the updated attendance and suppressed status appear automatically.
+  2. Backend **immediately cancels** the guest's pending reminder jobs (MongoDB `scheduledJobs`) (`reminderStatus = 'suppressed'`).
+  3. When the dashboard next refetches or polls `/api/v1/rsvps` (or `/api/v1/rsvps/summary`), the updated attendance and suppressed status appear automatically.
 - When a guest texts `STOP`:
   1. Backend logs a `ConsentRecord` with status `opted_out`.
   2. Sets `reminderStatus = 'opted_out'`.
@@ -154,11 +154,11 @@ WhatsApp conversations and replies run via Meta Cloud API webhooks:
 
 1. **Pass Signing**:
    - The frontend **never** generates trusted check-in tokens.
-   - When passes are generated or sent, the backend issues an HMAC-SHA256 signature containing `{ guestId, eventId, allowedPax, expiresAt }` signed with a server secret (`HMAC_SECRET`).
+   - When passes are generated or sent, the backend issues an HMAC-SHA256 signature containing `{ guestId, eventId, allowedPax, expiresAt }` signed with a server secret (`QR_SIGNING_SECRET` in the backend environment).
 2. **Gate Check-In (`POST /api/v1/check-ins/scan`)**:
    - At the entrance, the check-in executive's device captures the pass code (e.g. `BIZ-2026-X79K`) or the signed QR string and submits `{ qrData, gateId, paxCount }`.
    - The backend verifies the signature, checks that the pass is active and hasn't been revoked, verifies that the guest has not already been admitted (preventing duplicate entry), creates a `CheckInRecord`, increments the attendee count, and returns `{ success: true, isDuplicate: false }`.
-   - If a duplicate scan occurs, the backend responds with `{ success: false, isDuplicate: true, message: "Duplicate entry detected", guest: { ...prior checkin details... } }`.
+   - If a duplicate scan occurs, the backend responds with HTTP 200 and the standard envelope `{ success: true, data: { success: false, isDuplicate: true, reason: "DUPLICATE_CHECKIN", message, guest: { ...prior checkin details... } } }`. Returning 200 lets `apiClient` (which throws on a top-level `success: false`) hand the prior-entry details to the scanner UI. Invalid, revoked or expired passes use the same shape with `isDuplicate: false` and `reason` set to `INVALID_PASS`, `REVOKED` or `EXPIRED`.
 
 ---
 
@@ -171,7 +171,11 @@ WhatsApp conversations and replies run via Meta Cloud API webhooks:
 | `NOT_FOUND` | 404 | Displays resource empty state |
 | `VALIDATION_ERROR` | 422 | Binds field-level error messages to input forms |
 | `TEMPLATE_NOT_APPROVED` | 400 | Alerts user that template is awaiting Meta approval |
-| `DUPLICATE_CHECKIN` | 409 | Displays warning alert with previous entry timestamp |
+| `DUPLICATE_CHECKIN` | 200 (in `data.reason`, not an HTTP error) | Displays warning alert with previous entry timestamp |
+| `TENANT_ACCESS_DENIED` | 403 | Displays permission denied banner |
+| `CONFLICT` | 409 | Duplicate guest mobile on the event, already-committed import, invalid state change |
+| `IMPORT_ERROR` | 400 | Unreadable or invalid CSV file |
+| `RATE_LIMITED` | 429 | Ask the user to retry shortly |
 | `SERVER_ERROR` | 500 | Shows generic retry prompt |
 
 ---
@@ -184,6 +188,10 @@ WhatsApp conversations and replies run via Meta Cloud API webhooks:
 - `declined`: With regrets (companions count set to 0).
 - `maybe`: Tentative response.
 - `incomplete`: Partial response received.
+- `cancelled`: Invitation withdrawn by the organizer (backend addition; `DELETE /api/v1/guests/:id`).
+
+### Reminder Statuses (per guest)
+- `none` (backend addition: nothing scheduled yet), `scheduled`, `sent`, `suppressed`, `failed`, `opted_out`.
 
 ### Campaign Statuses
 - `draft` $\rightarrow$ `scheduled` $\rightarrow$ `running` $\rightarrow$ `paused` / `completed` / `failed` / `cancelled`.

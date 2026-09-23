@@ -119,7 +119,7 @@ export default function CheckInPage() {
             Admitted Pax
           </span>
           <p className="mt-1 text-2xl sm:text-3xl font-black text-indigo-900">
-            {summary?.checkedInPax || 185}
+            {summary?.checkedInPax || 0}
           </p>
           <span className="text-[10px] text-indigo-600">Through all gates</span>
         </div>
@@ -129,7 +129,7 @@ export default function CheckInPage() {
             Pending Entry
           </span>
           <p className="mt-1 text-2xl sm:text-3xl font-black text-slate-700">
-            {summary?.pendingPax || 335}
+            {summary?.pendingPax || 0}
           </p>
           <span className="text-[10px] text-slate-400">Awaiting arrival</span>
         </div>
@@ -139,7 +139,7 @@ export default function CheckInPage() {
             Expected Footfall
           </span>
           <p className="mt-1 text-2xl sm:text-3xl font-black text-slate-900">
-            {summary?.totalExpectedPax || 520}
+            {summary?.totalExpectedPax || 0}
           </p>
           <span className="text-[10px] text-slate-400">Total RSVP&apos;d Pax</span>
         </div>

@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import Link from "next/link";
 import { useAuth } from "@/lib/auth/context";
 import { useEvents } from "@/hooks/useEvents";
 import { getRoleDisplayName } from "@/lib/auth/permissions";
@@ -46,7 +47,7 @@ export function Header({ onOpenMobileSidebar }: HeaderProps) {
         </div>
 
         {/* Event Context Selector */}
-        {events && events.length > 0 && (
+        {events && events.length > 0 ? (
           <div className="flex items-center gap-2">
             <div className="relative">
               <select
@@ -65,6 +66,14 @@ export function Header({ onOpenMobileSidebar }: HeaderProps) {
               <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
             </div>
           </div>
+        ) : (
+          <Link
+            href="/dashboard/events"
+            className="hidden sm:flex items-center gap-1.5 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600 hover:border-indigo-500 hover:text-indigo-600 transition-colors"
+          >
+            <Calendar className="w-3.5 h-3.5 text-slate-400" />
+            <span>No Events (Create One)</span>
+          </Link>
         )}
       </div>
 

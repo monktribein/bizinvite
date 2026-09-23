@@ -105,7 +105,7 @@ export default function ReportsPage() {
           <Card>
             <CardHeader
               title="RSVP Response Distribution"
-              subtitle={`Total Response Rate: ${rsvpReport?.responseRatePercentage || 91}%`}
+              subtitle={`Total Response Rate: ${rsvpReport?.responseRatePercentage || 0}%`}
               action={
                 <Button
                   variant="ghost"
@@ -125,7 +125,7 @@ export default function ReportsPage() {
                     <span className="font-semibold text-emerald-900">Attending (Confirmed)</span>
                   </div>
                   <span className="font-bold text-emerald-800 text-sm">
-                    {rsvpReport?.attending || 268} guests
+                    {rsvpReport?.attending || 0} guests
                   </span>
                 </div>
 
@@ -135,7 +135,7 @@ export default function ReportsPage() {
                     <span className="font-semibold text-rose-900">Declined (With Regrets)</span>
                   </div>
                   <span className="font-bold text-rose-800 text-sm">
-                    {rsvpReport?.declined || 32} guests
+                    {rsvpReport?.declined || 0} guests
                   </span>
                 </div>
 
@@ -145,7 +145,7 @@ export default function ReportsPage() {
                     <span className="font-semibold text-amber-900">Tentative (Maybe)</span>
                   </div>
                   <span className="font-bold text-amber-800 text-sm">
-                    {rsvpReport?.maybe || 18} guests
+                    {rsvpReport?.maybe || 0} guests
                   </span>
                 </div>
 
@@ -155,7 +155,7 @@ export default function ReportsPage() {
                     <span className="font-semibold text-slate-800">Pending No Response</span>
                   </div>
                   <span className="font-bold text-slate-700 text-sm">
-                    {rsvpReport?.noResponse || 32} guests
+                    {rsvpReport?.noResponse || 0} guests
                   </span>
                 </div>
               </div>
@@ -169,7 +169,7 @@ export default function ReportsPage() {
           <Card>
             <CardHeader
               title="Live Turnout & Entry Velocity"
-              subtitle={`Peak Arrival Window: ${attendanceReport?.peakEntryHour || "19:00 - 20:00"}`}
+              subtitle={`Peak Arrival Window: ${attendanceReport?.peakEntryHour || "N/A"}`}
               action={
                 <Button
                   variant="ghost"
@@ -187,31 +187,35 @@ export default function ReportsPage() {
                   <div className="rounded-lg bg-slate-50 p-3 border border-slate-200">
                     <span className="text-[10px] font-bold uppercase text-slate-500">Actual Admitted</span>
                     <p className="text-xl font-bold text-slate-900">
-                      {attendanceReport?.actualCheckedIn || 185} Pax
+                      {attendanceReport?.actualCheckedIn || 0} Pax
                     </p>
                   </div>
                   <div className="rounded-lg bg-indigo-50 p-3 border border-indigo-100">
                     <span className="text-[10px] font-bold uppercase text-indigo-600">Turnout Rate</span>
                     <p className="text-xl font-bold text-indigo-700">
-                      {attendanceReport?.turnoutPercentage || 35.5}%
+                      {attendanceReport?.turnoutPercentage || 0}%
                     </p>
                   </div>
                 </div>
 
                 <div className="space-y-2 pt-2 border-t border-slate-100 text-xs">
                   <span className="font-semibold text-slate-700 block">Hourly Admissions Distribution:</span>
-                  {attendanceReport?.hourlyCheckIns?.map((h, i) => (
-                    <div key={i} className="flex items-center justify-between py-1">
-                      <span className="text-slate-600 font-mono">{h.hour}</span>
-                      <div className="flex-1 mx-3 bg-slate-100 h-2 rounded-full overflow-hidden">
-                        <div
-                          style={{ width: `${(h.count / 70) * 100}%` }}
-                          className="bg-indigo-600 h-full rounded-full"
-                        />
+                  {attendanceReport?.hourlyCheckIns && attendanceReport.hourlyCheckIns.length > 0 ? (
+                    attendanceReport.hourlyCheckIns.map((h, i) => (
+                      <div key={i} className="flex items-center justify-between py-1">
+                        <span className="text-slate-600 font-mono">{h.hour}</span>
+                        <div className="flex-1 mx-3 bg-slate-100 h-2 rounded-full overflow-hidden">
+                          <div
+                            style={{ width: `${(h.count / 70) * 100}%` }}
+                            className="bg-indigo-600 h-full rounded-full"
+                          />
+                        </div>
+                        <span className="font-bold text-slate-900 w-12 text-right">{h.count} Pax</span>
                       </div>
-                      <span className="font-bold text-slate-900 w-12 text-right">{h.count} Pax</span>
-                    </div>
-                  ))}
+                    ))
+                  ) : (
+                    <div className="text-slate-400 py-3 text-center">No admissions recorded yet.</div>
+                  )}
                 </div>
               </div>
             </CardContent>
@@ -239,7 +243,7 @@ export default function ReportsPage() {
                   <div className="rounded-lg bg-emerald-50 p-3 border border-emerald-100">
                     <span className="text-[10px] font-bold uppercase text-emerald-800">Conversion Rate</span>
                     <p className="text-xl font-bold text-emerald-700">
-                      {reminderReport?.conversionRatePercentage || 43.6}%
+                      {reminderReport?.conversionRatePercentage || 0}%
                     </p>
                     <span className="text-[10px] text-emerald-600">RSVPs triggered</span>
                   </div>
@@ -247,7 +251,7 @@ export default function ReportsPage() {
                   <div className="rounded-lg bg-indigo-50 p-3 border border-indigo-100">
                     <span className="text-[10px] font-bold uppercase text-indigo-800">Messages Saved</span>
                     <p className="text-xl font-bold text-indigo-700">
-                      {reminderReport?.savingsFromSuppressionCount || 74}
+                      {reminderReport?.savingsFromSuppressionCount || 0}
                     </p>
                     <span className="text-[10px] text-indigo-600">Via instant suppression</span>
                   </div>
@@ -256,15 +260,15 @@ export default function ReportsPage() {
                 <div className="rounded-lg bg-slate-50 p-3 border border-slate-200 space-y-1.5 text-slate-600">
                   <div className="flex justify-between">
                     <span>Reminders Dispatched:</span>
-                    <span className="font-semibold text-slate-900">{reminderReport?.remindersSent || 110}</span>
+                    <span className="font-semibold text-slate-900">{reminderReport?.remindersSent || 0}</span>
                   </div>
                   <div className="flex justify-between">
                     <span>Responses Secured Post-Reminder:</span>
-                    <span className="font-semibold text-emerald-700">{reminderReport?.rsvpsReceivedAfterReminder || 48}</span>
+                    <span className="font-semibold text-emerald-700">{reminderReport?.rsvpsReceivedAfterReminder || 0}</span>
                   </div>
                   <div className="flex justify-between">
                     <span>Estimated Cost Saved:</span>
-                    <span className="font-semibold text-slate-900">₹222 (~₹3/WA utility)</span>
+                    <span className="font-semibold text-slate-900">₹{(reminderReport?.savingsFromSuppressionCount || 0) * 3} (~₹3/WA utility)</span>
                   </div>
                 </div>
               </div>

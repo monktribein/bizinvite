@@ -110,37 +110,37 @@ export default function RSVPPage() {
       <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-2xs">
           <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Total Invited</span>
-          <p className="mt-1 text-2xl font-bold text-slate-900">{formatNumber(summary?.totalInvited || 350)}</p>
+          <p className="mt-1 text-2xl font-bold text-slate-900">{formatNumber(summary?.totalInvited || 0)}</p>
           <span className="text-[10px] text-slate-400">Invitees Dispatched</span>
         </div>
 
         <div className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-3.5 shadow-2xs">
           <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-800">Attending</span>
-          <p className="mt-1 text-2xl font-bold text-emerald-700">{formatNumber(summary?.attending || 268)}</p>
+          <p className="mt-1 text-2xl font-bold text-emerald-700">{formatNumber(summary?.attending || 0)}</p>
           <span className="text-[10px] text-emerald-700 font-medium">Confirmed Primary</span>
         </div>
 
         <div className="rounded-xl border border-indigo-200 bg-indigo-50/40 p-3.5 shadow-2xs">
           <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-800">Total Footfall</span>
-          <p className="mt-1 text-2xl font-bold text-indigo-700">{formatNumber(summary?.expectedFootfall || 520)}</p>
+          <p className="mt-1 text-2xl font-bold text-indigo-700">{formatNumber(summary?.expectedFootfall || 0)}</p>
           <span className="text-[10px] text-indigo-700 font-medium">Pax (With Companions)</span>
         </div>
 
         <div className="rounded-xl border border-rose-200 bg-rose-50/40 p-3.5 shadow-2xs">
           <span className="text-[11px] font-bold uppercase tracking-wider text-rose-800">Declined</span>
-          <p className="mt-1 text-2xl font-bold text-rose-700">{formatNumber(summary?.declined || 32)}</p>
+          <p className="mt-1 text-2xl font-bold text-rose-700">{formatNumber(summary?.declined || 0)}</p>
           <span className="text-[10px] text-rose-600">With Regrets</span>
         </div>
 
         <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-3.5 shadow-2xs">
           <span className="text-[11px] font-bold uppercase tracking-wider text-amber-800">Tentative (Maybe)</span>
-          <p className="mt-1 text-2xl font-bold text-amber-700">{formatNumber(summary?.maybe || 18)}</p>
+          <p className="mt-1 text-2xl font-bold text-amber-700">{formatNumber(summary?.maybe || 0)}</p>
           <span className="text-[10px] text-amber-600">Awaiting Schedule</span>
         </div>
 
         <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-2xs">
           <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Pending</span>
-          <p className="mt-1 text-2xl font-bold text-slate-700">{formatNumber(summary?.noResponse || 32)}</p>
+          <p className="mt-1 text-2xl font-bold text-slate-700">{formatNumber(summary?.noResponse || 0)}</p>
           <span className="text-[10px] text-slate-400">No Response</span>
         </div>
       </div>
@@ -154,7 +154,7 @@ export default function RSVPPage() {
           <div>
             <span className="text-xs text-slate-500 font-medium">Dietary Breakdown</span>
             <p className="text-sm font-bold text-slate-900 mt-0.5">
-              180 Veg • 68 Non-Veg • 42 Jain
+              {summary?.dietaryCounts?.vegetarian || 0} Veg • {summary?.dietaryCounts?.non_vegetarian || 0} Non-Veg • {summary?.dietaryCounts?.jain || 0} Jain
             </p>
           </div>
         </div>
@@ -166,7 +166,7 @@ export default function RSVPPage() {
           <div>
             <span className="text-xs text-slate-500 font-medium">Hotel Accommodation</span>
             <p className="text-sm font-bold text-slate-900 mt-0.5">
-              {summary?.accommodationRequestedCount || 94} Rooms Requested
+              {summary?.accommodationRequestedCount || 0} Rooms Requested
             </p>
           </div>
         </div>
@@ -178,7 +178,7 @@ export default function RSVPPage() {
           <div>
             <span className="text-xs text-slate-500 font-medium">Airport / Station Transfers</span>
             <p className="text-sm font-bold text-slate-900 mt-0.5">
-              {summary?.transportRequestedCount || 78} Pickups Scheduled
+              {summary?.transportRequestedCount || 0} Pickups Scheduled
             </p>
           </div>
         </div>

@@ -30,6 +30,7 @@ import {
   Calendar,
   RefreshCw,
   BellRing,
+  Plus,
 } from "lucide-react";
 
 export default function DashboardOverviewPage() {
@@ -53,6 +54,23 @@ export default function DashboardOverviewPage() {
     }),
     { sent: 0, delivered: 0, read: 0, failed: 0, scheduled: 0 }
   );
+
+  const deliveryRate =
+    campaignTotals.sent > 0
+      ? Math.round((campaignTotals.delivered / campaignTotals.sent) * 100)
+      : 0;
+
+  const totalInvited = rsvpSummary?.totalInvited || 0;
+  const attendingCount = rsvpSummary?.attending || 0;
+  const declinedCount = rsvpSummary?.declined || 0;
+  const maybeCount = rsvpSummary?.maybe || 0;
+  const noResponseCount = rsvpSummary?.noResponse || 0;
+  const respondedCount = attendingCount + declinedCount + maybeCount;
+  const responseRate = totalInvited > 0 ? Math.round((respondedCount / totalInvited) * 100) : 0;
+  const attendingPct = totalInvited > 0 ? (attendingCount / totalInvited) * 100 : 0;
+  const declinedPct = totalInvited > 0 ? (declinedCount / totalInvited) * 100 : 0;
+  const maybePct = totalInvited > 0 ? (maybeCount / totalInvited) * 100 : 0;
+  const noResponsePct = totalInvited > 0 ? (noResponseCount / totalInvited) * 100 : 0;
 
   return (
     <DashboardShell>
@@ -81,6 +99,7 @@ export default function DashboardOverviewPage() {
           >
             <RefreshCw className="w-3.5 h-3.5 mr-1" /> Refresh Data
           </Button>
+
           <Link href="/dashboard/check-in">
             <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 text-xs">
               <ScanLine className="w-3.5 h-3.5 mr-1" /> Live Gate Check-in
@@ -89,8 +108,8 @@ export default function DashboardOverviewPage() {
         </div>
       </div>
 
-      {/* Current Event Context Banner */}
-      {selectedEvent && (
+      {/* Current Event Context Banner OR Empty State */}
+      {selectedEvent ? (
         <div className="mb-6 rounded-xl border border-indigo-100 bg-linear-to-r from-indigo-50/70 via-white to-slate-50 p-4">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
             <div className="flex items-center gap-3">
@@ -122,6 +141,21 @@ export default function DashboardOverviewPage() {
             </div>
           </div>
         </div>
+      ) : (
+        <div className="mb-6 rounded-xl border border-dashed border-indigo-200 bg-indigo-50/40 p-6 text-center">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-100 text-indigo-600 mb-3">
+            <Calendar className="w-6 h-6" />
+          </div>
+          <h3 className="text-base font-bold text-slate-900">No Events Created Yet</h3>
+          <p className="text-xs text-slate-500 max-w-md mx-auto mt-1 mb-4">
+            Create your first event in the Events module to start importing guests, dispatching WhatsApp invitations, and tracking live gate attendance.
+          </p>
+          <Link href="/dashboard/events">
+            <Button size="sm" className="text-xs">
+              <Plus className="w-3.5 h-3.5 mr-1" /> Create First Event
+            </Button>
+          </Link>
+        </div>
       )}
 
       {/* KPI Grid - Primary Funnel & Attendance Metrics */}
@@ -135,7 +169,7 @@ export default function DashboardOverviewPage() {
             <Users className="h-4 w-4 text-slate-400" />
           </div>
           <p className="mt-2 text-2xl font-bold text-slate-900">
-            {formatNumber(selectedEvent?.totalGuestsCount || 350)}
+            {formatNumber(selectedEvent?.totalGuestsCount || 0)}
           </p>
           <span className="text-[10px] text-slate-400">Database Records</span>
         </div>
@@ -149,7 +183,7 @@ export default function DashboardOverviewPage() {
             <Send className="h-4 w-4 text-indigo-500" />
           </div>
           <p className="mt-2 text-2xl font-bold text-indigo-700">
-            {formatNumber(campaignTotals.sent || 325)}
+            {formatNumber(campaignTotals.sent)}
           </p>
           <span className="text-[10px] text-indigo-600 font-medium">Outbound Dispatched</span>
         </div>
@@ -163,9 +197,9 @@ export default function DashboardOverviewPage() {
             <CheckCircle className="h-4 w-4 text-sky-500" />
           </div>
           <p className="mt-2 text-2xl font-bold text-sky-700">
-            {formatNumber(campaignTotals.delivered || 312)}
+            {formatNumber(campaignTotals.delivered)}
           </p>
-          <span className="text-[10px] text-sky-600 font-medium">96% Delivery Rate</span>
+          <span className="text-[10px] text-sky-600 font-medium">{deliveryRate}% Delivery Rate</span>
         </div>
 
         {/* Read / Opened */}
@@ -177,7 +211,7 @@ export default function DashboardOverviewPage() {
             <Eye className="h-4 w-4 text-emerald-500" />
           </div>
           <p className="mt-2 text-2xl font-bold text-emerald-700">
-            {formatNumber(campaignTotals.read || 284)}
+            {formatNumber(campaignTotals.read)}
           </p>
           <span className="text-[10px] text-emerald-600 font-medium">Blue-tick confirmed</span>
         </div>
@@ -191,10 +225,10 @@ export default function DashboardOverviewPage() {
             <UserCheck className="h-4 w-4 text-emerald-600" />
           </div>
           <p className="mt-2 text-2xl font-bold text-emerald-800">
-            {formatNumber(rsvpSummary?.attending || 268)}
+            {formatNumber(attendingCount)}
           </p>
           <span className="text-[10px] text-emerald-600 font-medium">
-            +{rsvpSummary?.totalCompanions || 252} Companions
+            +{rsvpSummary?.totalCompanions || 0} Companions
           </span>
         </div>
 
@@ -207,7 +241,7 @@ export default function DashboardOverviewPage() {
             <ScanLine className="h-4 w-4 text-indigo-600" />
           </div>
           <p className="mt-2 text-2xl font-bold text-indigo-900">
-            {formatNumber(rsvpSummary?.checkedIn || 184)}
+            {formatNumber(rsvpSummary?.checkedIn || 0)}
           </p>
           <span className="text-[10px] text-indigo-600 font-medium">Admitted at Gates</span>
         </div>
@@ -221,7 +255,7 @@ export default function DashboardOverviewPage() {
             <UserX className="h-3.5 w-3.5 text-rose-500" />
           </div>
           <p className="text-lg font-bold text-rose-600 mt-1">
-            {formatNumber(rsvpSummary?.declined || 32)}
+            {formatNumber(declinedCount)}
           </p>
         </div>
 
@@ -231,7 +265,7 @@ export default function DashboardOverviewPage() {
             <HelpCircle className="h-3.5 w-3.5 text-amber-500" />
           </div>
           <p className="text-lg font-bold text-amber-600 mt-1">
-            {formatNumber(rsvpSummary?.maybe || 18)}
+            {formatNumber(maybeCount)}
           </p>
         </div>
 
@@ -241,7 +275,7 @@ export default function DashboardOverviewPage() {
             <Clock className="h-3.5 w-3.5 text-slate-400" />
           </div>
           <p className="text-lg font-bold text-slate-700 mt-1">
-            {formatNumber(rsvpSummary?.noResponse || 32)}
+            {formatNumber(noResponseCount)}
           </p>
         </div>
 
@@ -251,17 +285,17 @@ export default function DashboardOverviewPage() {
             <Footprints className="h-3.5 w-3.5 text-indigo-500" />
           </div>
           <p className="text-lg font-bold text-indigo-700 mt-1">
-            {formatNumber(rsvpSummary?.expectedFootfall || 520)} Pax
+            {formatNumber(rsvpSummary?.expectedFootfall || 0)} Pax
           </p>
         </div>
 
-        <div className="rounded-lg border border-rose-100 bg-rose-50/40 p-3">
+        <div className="rounded-lg border border-rose-200 bg-rose-50/50 p-3">
           <div className="flex items-center justify-between">
             <span className="text-xs text-rose-700 font-medium">Message Failures</span>
             <AlertTriangle className="h-3.5 w-3.5 text-rose-600" />
           </div>
           <p className="text-lg font-bold text-rose-700 mt-1">
-            {formatNumber(failureReport?.totalFailures || 5)}
+            {formatNumber(failureReport?.totalFailures || 0)}
           </p>
         </div>
       </div>
@@ -287,13 +321,21 @@ export default function DashboardOverviewPage() {
               <div>
                 <div className="flex justify-between text-xs font-semibold mb-1.5">
                   <span className="text-slate-700">Response Rate</span>
-                  <span className="text-emerald-700">91% (318 / 350)</span>
+                  <span className="text-emerald-700">
+                    {responseRate}% ({respondedCount} / {totalInvited})
+                  </span>
                 </div>
                 <div className="h-2.5 w-full bg-slate-100 rounded-full overflow-hidden flex">
-                  <div style={{ width: "76%" }} className="bg-emerald-500" title="Attending (76%)" />
-                  <div style={{ width: "9%" }} className="bg-rose-500" title="Declined (9%)" />
-                  <div style={{ width: "6%" }} className="bg-amber-400" title="Maybe (6%)" />
-                  <div style={{ width: "9%" }} className="bg-slate-300" title="No Response (9%)" />
+                  {totalInvited > 0 ? (
+                    <>
+                      <div style={{ width: `${attendingPct}%` }} className="bg-emerald-500" title={`Attending (${Math.round(attendingPct)}%)`} />
+                      <div style={{ width: `${declinedPct}%` }} className="bg-rose-500" title={`Declined (${Math.round(declinedPct)}%)`} />
+                      <div style={{ width: `${maybePct}%` }} className="bg-amber-400" title={`Maybe (${Math.round(maybePct)}%)`} />
+                      <div style={{ width: `${noResponsePct}%` }} className="bg-slate-300" title={`No Response (${Math.round(noResponsePct)}%)`} />
+                    </>
+                  ) : (
+                    <div style={{ width: "100%" }} className="bg-slate-200" title="No RSVPs recorded yet" />
+                  )}
                 </div>
               </div>
 
@@ -304,7 +346,7 @@ export default function DashboardOverviewPage() {
                     <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
                     <span className="text-slate-700 font-medium">Attending</span>
                   </div>
-                  <span className="font-semibold text-slate-900">{rsvpSummary?.attending || 268} guests</span>
+                  <span className="font-semibold text-slate-900">{attendingCount} guests</span>
                 </div>
 
                 <div className="flex items-center justify-between py-1">
@@ -312,40 +354,42 @@ export default function DashboardOverviewPage() {
                     <span className="w-2.5 h-2.5 rounded-full bg-rose-500" />
                     <span className="text-slate-700 font-medium">Declined</span>
                   </div>
-                  <span className="font-semibold text-slate-900">{rsvpSummary?.declined || 32} guests</span>
+                  <span className="font-semibold text-slate-900">{declinedCount} guests</span>
                 </div>
 
                 <div className="flex items-center justify-between py-1">
                   <div className="flex items-center gap-2">
                     <span className="w-2.5 h-2.5 rounded-full bg-amber-400" />
-                    <span className="text-slate-700 font-medium">Tentative (Maybe)</span>
+                    <span className="text-slate-700 font-medium">Maybe / Tentative</span>
                   </div>
-                  <span className="font-semibold text-slate-900">{rsvpSummary?.maybe || 18} guests</span>
+                  <span className="font-semibold text-slate-900">{maybeCount} guests</span>
                 </div>
 
                 <div className="flex items-center justify-between py-1">
                   <div className="flex items-center gap-2">
                     <span className="w-2.5 h-2.5 rounded-full bg-slate-300" />
-                    <span className="text-slate-700 font-medium">No Response Yet</span>
+                    <span className="text-slate-700 font-medium">No Response</span>
                   </div>
-                  <span className="font-semibold text-slate-900">{rsvpSummary?.noResponse || 32} guests</span>
+                  <span className="font-semibold text-slate-900">{noResponseCount} guests</span>
                 </div>
               </div>
 
-              {/* Meal & Logistic Highlights */}
-              <div className="rounded-lg bg-slate-50 p-3 text-xs border border-slate-200/60 mt-3 space-y-1">
-                <p className="font-semibold text-slate-800">Hospitality Requirements:</p>
+              {/* Requirements Summary */}
+              <div className="rounded-lg bg-slate-50 p-3 border border-slate-200/80 text-xs space-y-1.5">
+                <span className="font-bold text-slate-800 block text-[11px] uppercase tracking-wider mb-2">
+                  Special Logistics Requirements
+                </span>
                 <div className="flex justify-between text-slate-600">
-                  <span>Vegetarian / Jain:</span>
-                  <span className="font-medium text-slate-900">222 Pax</span>
+                  <span>Pure Vegetarian Meals:</span>
+                  <span className="font-medium text-slate-900">{rsvpSummary?.dietaryCounts?.vegetarian || 0} Pax</span>
                 </div>
                 <div className="flex justify-between text-slate-600">
                   <span>Accommodation Requested:</span>
-                  <span className="font-medium text-slate-900">94 Rooms</span>
+                  <span className="font-medium text-slate-900">{rsvpSummary?.accommodationRequestedCount || 0} Rooms</span>
                 </div>
                 <div className="flex justify-between text-slate-600">
                   <span>Airport Transfers:</span>
-                  <span className="font-medium text-slate-900">78 Pickups</span>
+                  <span className="font-medium text-slate-900">{rsvpSummary?.transportRequestedCount || 0} Pickups</span>
                 </div>
               </div>
             </div>
@@ -367,44 +411,50 @@ export default function DashboardOverviewPage() {
           />
           <CardContent className="p-0">
             <div className="divide-y divide-slate-100">
-              {campaigns.map((camp) => {
-                const statusCfg = CAMPAIGN_STATUS_CONFIG[camp.status] || CAMPAIGN_STATUS_CONFIG.draft;
-                return (
-                  <div key={camp.id} className="p-4 hover:bg-slate-50/50 transition-colors">
-                    <div className="flex items-center justify-between mb-2">
-                      <div>
-                        <span className="text-xs font-bold text-slate-900">{camp.name}</span>
-                        <p className="text-[11px] text-slate-500">
-                          Template: <span className="font-mono">{camp.templateName}</span>
-                        </p>
+              {campaigns.length === 0 ? (
+                <div className="p-8 text-center text-xs text-slate-400">
+                  No invitation campaigns sent yet for this event.
+                </div>
+              ) : (
+                campaigns.map((camp) => {
+                  const statusCfg = CAMPAIGN_STATUS_CONFIG[camp.status] || CAMPAIGN_STATUS_CONFIG.draft;
+                  return (
+                    <div key={camp.id} className="p-4 hover:bg-slate-50/50 transition-colors">
+                      <div className="flex items-center justify-between mb-2">
+                        <div>
+                          <span className="text-xs font-bold text-slate-900">{camp.name}</span>
+                          <p className="text-[11px] text-slate-500">
+                            Template: <span className="font-mono">{camp.templateName}</span>
+                          </p>
+                        </div>
+                        <Badge className={statusCfg.color} size="sm">
+                          {statusCfg.label}
+                        </Badge>
                       </div>
-                      <Badge className={statusCfg.color} size="sm">
-                        {statusCfg.label}
-                      </Badge>
-                    </div>
 
-                    {/* Delivery metrics line */}
-                    <div className="grid grid-cols-4 gap-2 pt-2 border-t border-slate-100/80 text-[11px]">
-                      <div>
-                        <span className="text-slate-400 block">Targeted</span>
-                        <span className="font-semibold text-slate-800">{camp.metrics?.totalTargeted || 0}</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-400 block">Delivered</span>
-                        <span className="font-semibold text-slate-800">{camp.metrics?.delivered || 0}</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-400 block">Read</span>
-                        <span className="font-semibold text-emerald-700">{camp.metrics?.read || 0}</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-400 block">Suppressed</span>
-                        <span className="font-semibold text-slate-600">{camp.metrics?.suppressed || 0}</span>
+                      {/* Delivery metrics line */}
+                      <div className="grid grid-cols-4 gap-2 pt-2 border-t border-slate-100/80 text-[11px]">
+                        <div>
+                          <span className="text-slate-400 block">Targeted</span>
+                          <span className="font-semibold text-slate-800">{camp.metrics?.totalTargeted || 0}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-400 block">Delivered</span>
+                          <span className="font-semibold text-slate-800">{camp.metrics?.delivered || 0}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-400 block">Read</span>
+                          <span className="font-semibold text-emerald-700">{camp.metrics?.read || 0}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-400 block">Suppressed</span>
+                          <span className="font-semibold text-slate-600">{camp.metrics?.suppressed || 0}</span>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })
+              )}
             </div>
           </CardContent>
         </Card>
@@ -426,24 +476,30 @@ export default function DashboardOverviewPage() {
             }
           />
           <CardContent className="space-y-3">
-            {reminderRules.map((rule) => (
-              <div key={rule.id} className="rounded-lg border border-slate-200 p-3 bg-white">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-slate-900">{rule.name}</span>
-                  <Badge variant="success" size="sm">
-                    {rule.status.toUpperCase()}
-                  </Badge>
-                </div>
-                <p className="text-[11px] text-slate-500 mt-1">
-                  Trigger: {rule.triggerType} ({Math.abs(rule.offsetMinutes / 60)}h prior) • Quiet Hours:{" "}
-                  {rule.quietHours.enabled ? `${rule.quietHours.start} - ${rule.quietHours.end}` : "Disabled"}
-                </p>
-                <div className="mt-2 flex items-center justify-between text-[11px] border-t border-slate-100 pt-2 text-slate-600">
-                  <span>Audience: <b>{rule.audienceCount}</b> pending</span>
-                  <span className="text-emerald-700 font-medium">Auto-suppressed: {rule.suppressedCount} RSVPed</span>
-                </div>
+            {reminderRules.length === 0 ? (
+              <div className="p-8 text-center text-xs text-slate-400">
+                No active reminder workflows configured.
               </div>
-            ))}
+            ) : (
+              reminderRules.map((rule) => (
+                <div key={rule.id} className="rounded-lg border border-slate-200 p-3 bg-white">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-slate-900">{rule.name}</span>
+                    <Badge variant="success" size="sm">
+                      {rule.status.toUpperCase()}
+                    </Badge>
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Trigger: {rule.triggerType} ({Math.abs(rule.offsetMinutes / 60)}h prior) • Quiet Hours:{" "}
+                    {rule.quietHours.enabled ? `${rule.quietHours.start} - ${rule.quietHours.end}` : "Disabled"}
+                  </p>
+                  <div className="mt-2 flex items-center justify-between text-[11px] border-t border-slate-100 pt-2 text-slate-600">
+                    <span>Audience: <b>{rule.audienceCount}</b> pending</span>
+                    <span className="text-emerald-700 font-medium">Auto-suppressed: {rule.suppressedCount} RSVPed</span>
+                  </div>
+                </div>
+              ))
+            )}
           </CardContent>
         </Card>
 
@@ -462,26 +518,28 @@ export default function DashboardOverviewPage() {
           />
           <CardContent className="p-0">
             <div className="divide-y divide-slate-100">
-              {failureReport?.recentFailedRecipients?.map((fail, i) => (
-                <div key={i} className="p-3.5 flex items-center justify-between hover:bg-slate-50 text-xs">
-                  <div>
-                    <span className="font-semibold text-slate-900">{fail.guestName}</span>
-                    <p className="text-slate-500 font-mono text-[11px]">{fail.mobile}</p>
-                    <span className="text-[10px] text-rose-600 font-medium">{fail.reason}</span>
-                  </div>
-                  <div className="text-right">
-                    <span className="text-[10px] text-slate-400 block">{formatDate(fail.failedAt)}</span>
-                    <Link href={`/dashboard/guests`}>
-                      <span className="text-[11px] text-indigo-600 font-semibold hover:underline">
-                        Correct Phone
-                      </span>
-                    </Link>
-                  </div>
-                </div>
-              )) || (
+              {!failureReport?.recentFailedRecipients || failureReport.recentFailedRecipients.length === 0 ? (
                 <div className="p-6 text-center text-xs text-slate-400">
                   No active message failures recorded.
                 </div>
+              ) : (
+                failureReport.recentFailedRecipients.map((fail, i) => (
+                  <div key={i} className="p-3.5 flex items-center justify-between hover:bg-slate-50 text-xs">
+                    <div>
+                      <span className="font-semibold text-slate-900">{fail.guestName}</span>
+                      <p className="text-slate-500 font-mono text-[11px]">{fail.mobile}</p>
+                      <span className="text-[10px] text-rose-600 font-medium">{fail.reason}</span>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-[10px] text-slate-400 block">{formatDate(fail.failedAt)}</span>
+                      <Link href={`/dashboard/guests`}>
+                        <span className="text-[11px] text-indigo-600 font-semibold hover:underline">
+                          Correct Phone
+                        </span>
+                      </Link>
+                    </div>
+                  </div>
+                ))
               )}
             </div>
           </CardContent>
