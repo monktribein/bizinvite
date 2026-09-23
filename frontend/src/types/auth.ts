@@ -15,6 +15,7 @@ export interface User {
   organizationId: string;
   organizationName: string;
   avatarUrl?: string;
+  status?: "active" | "invited" | "suspended";
   createdAt: string;
 }
 

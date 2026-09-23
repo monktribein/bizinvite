@@ -10,8 +10,8 @@ import { Input } from "@/components/ui/Input";
 export default function LoginPage() {
   const router = useRouter();
   const { login } = useAuth();
-  const [email, setEmail] = useState("admin@bizinvite.io");
-  const [password, setPassword] = useState("••••••••");
+  const [email, setEmail] = useState("admin@bizinvite.com");
+  const [password, setPassword] = useState("admin123");
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
 
@@ -32,11 +32,6 @@ export default function LoginPage() {
     } finally {
       setIsLoading(false);
     }
-  };
-
-  const handleQuickLogin = (demoEmail: string) => {
-    setEmail(demoEmail);
-    setPassword("password123");
   };
 
   return (
@@ -103,47 +98,6 @@ export default function LoginPage() {
               Sign In to Operations <ArrowRight className="w-4 h-4 ml-1.5" />
             </Button>
           </form>
-
-          {/* Quick Demo Role Selector */}
-          <div className="mt-6 border-t border-slate-100 pt-5">
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-2">
-              Development Quick-Switch (Mock Roles):
-            </p>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => handleQuickLogin("admin@bizinvite.io")}
-                className="rounded-lg border border-slate-200 bg-slate-50/70 p-2 text-left text-xs hover:border-indigo-300 hover:bg-indigo-50/30 transition-all cursor-pointer"
-              >
-                <p className="font-semibold text-slate-800">Org Owner</p>
-                <p className="text-[10px] text-slate-500 truncate">admin@bizinvite.io</p>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleQuickLogin("superadmin@bizinvite.io")}
-                className="rounded-lg border border-slate-200 bg-slate-50/70 p-2 text-left text-xs hover:border-indigo-300 hover:bg-indigo-50/30 transition-all cursor-pointer"
-              >
-                <p className="font-semibold text-slate-800">Platform Super</p>
-                <p className="text-[10px] text-slate-500 truncate">superadmin@bizinvite.io</p>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleQuickLogin("eventmgr@bizinvite.io")}
-                className="rounded-lg border border-slate-200 bg-slate-50/70 p-2 text-left text-xs hover:border-indigo-300 hover:bg-indigo-50/30 transition-all cursor-pointer"
-              >
-                <p className="font-semibold text-slate-800">Event Admin</p>
-                <p className="text-[10px] text-slate-500 truncate">eventmgr@bizinvite.io</p>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleQuickLogin("gate1@bizinvite.io")}
-                className="rounded-lg border border-slate-200 bg-slate-50/70 p-2 text-left text-xs hover:border-indigo-300 hover:bg-indigo-50/30 transition-all cursor-pointer"
-              >
-                <p className="font-semibold text-slate-800">Check-in Exec</p>
-                <p className="text-[10px] text-slate-500 truncate">gate1@bizinvite.io</p>
-              </button>
-            </div>
-          </div>
         </div>
 
         {/* Security Footer */}

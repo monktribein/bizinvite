@@ -1,5 +1,5 @@
-import { User } from "@/types/auth";
-import { Organization } from "@/types/organization";
+import { User, Role } from "@/types/auth";
+import { Organization, TeamMember } from "@/types/organization";
 import { Event } from "@/types/event";
 import { Guest, RSVPStatus, ImportPreviewResult } from "@/types/guest";
 import { Campaign, WhatsAppTemplate } from "@/types/campaign";
@@ -40,11 +40,12 @@ export const MOCK_ORGANIZATION: Organization = {
 export const MOCK_USERS: User[] = [
   {
     id: "usr_admin_01",
-    email: "admin@bizinvite.io",
+    email: "admin@bizinvite.com",
     name: "Kabir Malhotra",
     role: "ORGANIZATION_OWNER",
     organizationId: "org_biz_aura_001",
     organizationName: "Aura Events & Hospitality",
+    status: "active",
     createdAt: "2026-01-15T10:00:00Z",
   },
   {
@@ -102,6 +103,17 @@ export const MOCK_USERS: User[] = [
     createdAt: "2026-03-05T10:00:00Z",
   },
 ];
+
+export const MOCK_USER_PASSWORDS: Record<string, string> = {
+  "admin@bizinvite.com": "admin123",
+  "admin@bizinvite.io": "admin123",
+  "superadmin@bizinvite.io": "admin123",
+  "eventmgr@bizinvite.io": "admin123",
+  "guestmanager@bizinvite.io": "admin123",
+  "comms@bizinvite.io": "admin123",
+  "checkin@bizinvite.io": "admin123",
+  "viewer@bizinvite.io": "admin123",
+};
 
 // Clean Collections (All dummy records removed)
 export const MOCK_EVENTS: Event[] = [];
@@ -184,9 +196,36 @@ class MockAdapter {
   private consentRecords: ConsentRecord[] = [];
 
   // Auth
-  async login(email: string): Promise<{ user: User; tokens: { accessToken: string; refreshToken: string; expiresIn: number } }> {
-    await delay();
-    const matched = MOCK_USERS.find((u) => u.email.toLowerCase() === email.toLowerCase()) || MOCK_USERS[0];
+  async login(
+    email: string,
+    password?: string
+  ): Promise<{ user: User; tokens: { accessToken: string; refreshToken: string; expiresIn: number } }> {
+    await delay(120);
+    const normalizedEmail = email.trim().toLowerCase();
+
+    // Match by email or alias
+    const matched = MOCK_USERS.find(
+      (u) =>
+        u.email.toLowerCase() === normalizedEmail ||
+        (normalizedEmail === "admin@bizinvite.io" && u.email.toLowerCase() === "admin@bizinvite.com")
+    );
+
+    if (!matched) {
+      throw new Error(`Account not found for ${email}. (Organization Owner is admin@bizinvite.com)`);
+    }
+
+    if (matched.status === "suspended") {
+      throw new Error("This account has been suspended by the Organization Administrator. Access denied.");
+    }
+
+    const expectedPassword = MOCK_USER_PASSWORDS[matched.email.toLowerCase()] || "admin123";
+    if (password && password !== expectedPassword) {
+      throw new Error("Invalid password. Please enter the correct password (default: admin123).");
+    }
+
+    if (typeof window !== "undefined") {
+      localStorage.setItem("bizinvite_current_user_email", matched.email);
+    }
     return {
       user: matched,
       tokens: {
@@ -199,6 +238,17 @@ class MockAdapter {
 
   async getCurrentUser(): Promise<User> {
     await delay(50);
+    if (typeof window !== "undefined") {
+      const savedEmail = localStorage.getItem("bizinvite_current_user_email");
+      if (savedEmail) {
+        const found = MOCK_USERS.find(
+          (u) =>
+            u.email.toLowerCase() === savedEmail.toLowerCase() ||
+            (savedEmail.toLowerCase() === "admin@bizinvite.io" && u.email.toLowerCase() === "admin@bizinvite.com")
+        );
+        if (found) return found;
+      }
+    }
     return MOCK_USERS[0];
   }
 
@@ -208,16 +258,156 @@ class MockAdapter {
     return MOCK_ORGANIZATION;
   }
 
-  async getTeamMembers() {
+  async getTeamMembers(): Promise<TeamMember[]> {
     await delay(100);
     return MOCK_USERS.map((u) => ({
       id: u.id,
       name: u.name,
       email: u.email,
       role: u.role,
-      status: "active" as const,
+      status: u.status || "active",
       createdAt: u.createdAt,
     }));
+  }
+
+  async inviteTeamMember(data: { name: string; email: string; role: Role; password?: string }): Promise<TeamMember> {
+    await delay(150);
+    const normalizedEmail = data.email.trim().toLowerCase();
+    const existingIndex = MOCK_USERS.findIndex((u) => u.email.toLowerCase() === normalizedEmail);
+
+    if (existingIndex >= 0) {
+      MOCK_USERS[existingIndex].name = data.name.trim();
+      MOCK_USERS[existingIndex].role = data.role;
+      if (data.password && data.password.trim()) {
+        MOCK_USER_PASSWORDS[normalizedEmail] = data.password.trim();
+      }
+      return {
+        id: MOCK_USERS[existingIndex].id,
+        name: data.name,
+        email: data.email,
+        role: data.role,
+        status: MOCK_USERS[existingIndex].status || "active",
+        createdAt: MOCK_USERS[existingIndex].createdAt,
+      };
+    }
+
+    const newUser: User = {
+      id: `usr_staff_${Date.now()}`,
+      email: normalizedEmail,
+      name: data.name.trim(),
+      role: data.role,
+      status: "active",
+      organizationId: MOCK_ORGANIZATION.id,
+      organizationName: MOCK_ORGANIZATION.name,
+      createdAt: new Date().toISOString(),
+    };
+
+    MOCK_USERS.push(newUser);
+    MOCK_USER_PASSWORDS[normalizedEmail] = (data.password && data.password.trim()) || "admin123";
+
+    // Record an audit log for security
+    this.auditLogs.unshift({
+      id: `aud_${Date.now()}`,
+      organizationId: MOCK_ORGANIZATION.id,
+      userId: "usr_admin_01",
+      userName: "Kabir Malhotra",
+      userRole: "ORGANIZATION_OWNER",
+      action: "STAFF_INVITED",
+      resourceType: "settings",
+      resourceId: newUser.id,
+      details: `Invited new team member ${newUser.name} (${newUser.email}) with role ${newUser.role}`,
+      ipAddress: "127.0.0.1",
+      timestamp: new Date().toISOString(),
+    });
+
+    return {
+      id: newUser.id,
+      name: newUser.name,
+      email: newUser.email,
+      role: newUser.role,
+      status: "active",
+      createdAt: newUser.createdAt,
+    };
+  }
+
+  async updateTeamMember(
+    memberId: string,
+    data: {
+      name?: string;
+      role?: Role;
+      status?: "active" | "invited" | "suspended";
+      password?: string;
+    }
+  ): Promise<TeamMember> {
+    await delay(150);
+    const userIndex = MOCK_USERS.findIndex((u) => u.id === memberId);
+    if (userIndex === -1) {
+      throw new Error("Staff member not found.");
+    }
+
+    const user = MOCK_USERS[userIndex];
+    if (data.name && data.name.trim()) user.name = data.name.trim();
+    if (data.role) user.role = data.role;
+    if (data.status) user.status = data.status;
+
+    if (data.password && data.password.trim()) {
+      MOCK_USER_PASSWORDS[user.email.toLowerCase()] = data.password.trim();
+    }
+
+    // Security audit log
+    this.auditLogs.unshift({
+      id: `aud_${Date.now()}`,
+      organizationId: MOCK_ORGANIZATION.id,
+      userId: "usr_admin_01",
+      userName: "Kabir Malhotra",
+      userRole: "ORGANIZATION_OWNER",
+      action: "STAFF_UPDATED",
+      resourceType: "settings",
+      resourceId: user.id,
+      details: `Updated staff member ${user.name} (${user.email}) - Role: ${user.role}, Status: ${user.status || "active"}${data.password ? ", Password reset" : ""}`,
+      ipAddress: "127.0.0.1",
+      timestamp: new Date().toISOString(),
+    });
+
+    return {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      status: user.status || "active",
+      createdAt: user.createdAt,
+    };
+  }
+
+  async deleteTeamMember(memberId: string): Promise<void> {
+    await delay(150);
+    const userIndex = MOCK_USERS.findIndex((u) => u.id === memberId);
+    if (userIndex === -1) {
+      throw new Error("Staff member not found.");
+    }
+
+    const user = MOCK_USERS[userIndex];
+    if (user.id === "usr_admin_01" || user.email.toLowerCase() === "admin@bizinvite.com") {
+      throw new Error("Cannot delete primary Organization Owner.");
+    }
+
+    MOCK_USERS.splice(userIndex, 1);
+    delete MOCK_USER_PASSWORDS[user.email.toLowerCase()];
+
+    // Security audit log
+    this.auditLogs.unshift({
+      id: `aud_${Date.now()}`,
+      organizationId: MOCK_ORGANIZATION.id,
+      userId: "usr_admin_01",
+      userName: "Kabir Malhotra",
+      userRole: "ORGANIZATION_OWNER",
+      action: "STAFF_DELETED",
+      resourceType: "settings",
+      resourceId: user.id,
+      details: `Removed staff member ${user.name} (${user.email}) from organization`,
+      ipAddress: "127.0.0.1",
+      timestamp: new Date().toISOString(),
+    });
   }
 
   // Events

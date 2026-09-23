@@ -21,6 +21,41 @@ export const organizationService = {
     return response.data;
   },
 
+  async inviteTeamMember(
+    orgId: string,
+    data: { name: string; email: string; role: import("@/types/auth").Role; password?: string }
+  ): Promise<TeamMember> {
+    if (isMockEnabled()) {
+      return mockAdapter.inviteTeamMember(data);
+    }
+    const response = await apiClient.post<TeamMember>(`/api/v1/organizations/${orgId}/team`, data);
+    return response.data;
+  },
+
+  async updateTeamMember(
+    orgId: string,
+    memberId: string,
+    data: {
+      name?: string;
+      role?: import("@/types/auth").Role;
+      status?: "active" | "invited" | "suspended";
+      password?: string;
+    }
+  ): Promise<TeamMember> {
+    if (isMockEnabled()) {
+      return mockAdapter.updateTeamMember(memberId, data);
+    }
+    const response = await apiClient.patch<TeamMember>(`/api/v1/organizations/${orgId}/team/${memberId}`, data);
+    return response.data;
+  },
+
+  async deleteTeamMember(orgId: string, memberId: string): Promise<void> {
+    if (isMockEnabled()) {
+      return mockAdapter.deleteTeamMember(memberId);
+    }
+    await apiClient.delete(`/api/v1/organizations/${orgId}/team/${memberId}`);
+  },
+
   async getAuditLogs(orgId: string): Promise<AuditLog[]> {
     if (isMockEnabled()) {
       return mockAdapter.getAuditLogs();
