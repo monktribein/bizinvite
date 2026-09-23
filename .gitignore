@@ -1,0 +1,7 @@
+# Repository-wide ignores. frontend/ and backend/ have their own .gitignore files.
+.DS_Store
+Thumbs.db
+*.log
+.env
+.env.*
+!.env.example
