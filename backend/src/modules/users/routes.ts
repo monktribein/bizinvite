@@ -8,3 +8,4 @@ export const usersRouter = Router();
 usersRouter.get("/", requireAnyPermission("team:manage", "settings:manage"), controller.list);
 usersRouter.post("/invite", requirePermission("team:manage"), controller.invite);
 usersRouter.patch("/:id", requirePermission("team:manage"), controller.update);
+usersRouter.delete("/:id", requirePermission("team:manage"), controller.remove);

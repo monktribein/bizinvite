@@ -15,6 +15,9 @@ organizationsRouter.post("/", requirePlatformAdmin, controller.create);
 organizationsRouter.get("/:id", resolveTenantFromParam, controller.get);
 organizationsRouter.patch("/:id", resolveTenantFromParam, requirePermission("settings:manage"), controller.update);
 organizationsRouter.get("/:id/team", resolveTenantFromParam, requireAnyPermission("team:manage", "settings:manage"), controller.team);
+organizationsRouter.post("/:id/team", resolveTenantFromParam, requirePermission("team:manage"), controller.addTeamMember);
+organizationsRouter.patch("/:id/team/:memberId", resolveTenantFromParam, requirePermission("team:manage"), controller.updateTeamMember);
+organizationsRouter.delete("/:id/team/:memberId", resolveTenantFromParam, requirePermission("team:manage"), controller.removeTeamMember);
 organizationsRouter.get(
   "/:id/audit-logs",
   resolveTenantFromParam,

@@ -2,10 +2,11 @@ import type { Request, Response } from "express";
 import { z } from "zod";
 import { actorFromRequest } from "../../common/utils/context";
 import { sendPaginated, sendSuccess } from "../../common/utils/response";
-import { paginationSchema } from "../../common/validators/common";
+import { paginationSchema, parseId } from "../../common/validators/common";
 import { listAuditLogs } from "../audit";
 import { listConsents } from "../guests/consent.service";
-import { listTeam } from "../users/service";
+import { inviteUserSchema, updateMemberSchema } from "../users/schema";
+import { inviteUser, listTeam, removeMember, updateMember } from "../users/service";
 import { auditQuerySchema, createOrganizationSchema, updateOrganizationSchema } from "./schema";
 import * as orgService from "./service";
 
@@ -50,4 +51,21 @@ export async function consents(req: Request, res: Response) {
   const { status } = consentQuerySchema.parse(req.query);
   const { items, total } = await listConsents(req.tenant!.organizationId, { status }, page);
   sendPaginated(req, res, items, { ...page, total });
+}
+
+/** POST /organizations/:id/team: returns the new member (the frontend TeamMember shape). */
+export async function addTeamMember(req: Request, res: Response) {
+  const body = inviteUserSchema.parse(req.body);
+  const { member, inviteToken } = await inviteUser(actorFromRequest(req), body);
+  sendSuccess(req, res, { ...member, inviteToken }, { status: 201, message: "Team member added" });
+}
+
+export async function updateTeamMember(req: Request, res: Response) {
+  const userId = parseId(req.params.memberId, "Team member");
+  sendSuccess(req, res, await updateMember(actorFromRequest(req), userId, updateMemberSchema.parse(req.body)));
+}
+
+export async function removeTeamMember(req: Request, res: Response) {
+  await removeMember(actorFromRequest(req), parseId(req.params.memberId, "Team member"));
+  sendSuccess(req, res, { message: "Team member removed" });
 }

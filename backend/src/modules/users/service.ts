@@ -4,6 +4,7 @@ import type { ActorContext } from "../../common/utils/context";
 import { randomToken, sha256 } from "../../common/utils/crypto";
 import { recordAudit } from "../audit";
 import { RefreshToken } from "../auth/model";
+import { hashPassword } from "../auth/password";
 import { Membership, MembershipDoc, User, UserDoc } from "./model";
 import { userRepository } from "./repository";
 
@@ -45,13 +46,22 @@ function assertCanAssign(actorRole: string | undefined, targetRole: string): voi
  * Invites a user into the organization. Email delivery is outside the MVP scope,
  * so the one-time invitation token is returned to the inviter to share.
  */
-export async function inviteUser(actor: ActorContext, input: { name: string; email: string; role: string }) {
+export async function inviteUser(actor: ActorContext, input: { name: string; email: string; role: string; password?: string }) {
   assertCanAssign(actor.userRole, input.role);
 
   let user = await userRepository.findByEmail(input.email);
   let inviteToken: string | undefined;
 
-  if (!user) {
+  if (!user && input.password) {
+    // Admin-set password: the account can sign in right away
+    user = await User.create({
+      email: input.email,
+      name: input.name,
+      status: "active",
+      passwordHash: await hashPassword(input.password),
+      defaultOrganizationId: actor.organizationId,
+    });
+  } else if (!user) {
     inviteToken = randomToken(32);
     user = await User.create({
       email: input.email,
@@ -89,12 +99,16 @@ export async function inviteUser(actor: ActorContext, input: { name: string; ema
 export async function updateMember(
   actor: ActorContext,
   userId: string,
-  changes: { role?: string; status?: "active" | "suspended"; name?: string }
+  changes: { role?: string; status?: "active" | "suspended"; name?: string; password?: string }
 ) {
   const membership = await userRepository.findMembership(actor.organizationId, userId);
   if (!membership) throw Errors.notFound("Team member");
   const user = await User.findById(userId);
   if (!user) throw Errors.notFound("Team member");
+
+  // Forms resend the current role/status; only actual changes count
+  if (changes.role === membership.role) delete changes.role;
+  if (changes.status === membership.status) delete changes.status;
 
   if (userId === actor.userId && (changes.role || changes.status)) {
     throw Errors.forbidden("You cannot change your own role or status");
@@ -108,13 +122,33 @@ export async function updateMember(
     if (owners <= 1) throw Errors.conflict("An organization must keep at least one active owner");
   }
 
+  if (changes.password && userId !== actor.userId) {
+    // Only an account that belongs solely to this organization may have its password set by its admins
+    const elsewhere = await Membership.exists({ userId, organizationId: { $ne: actor.organizationId } });
+    if (elsewhere) throw Errors.forbidden("This user also belongs to another organization; they must change their own password");
+  }
+
   const before = { role: membership.role, status: membership.status };
   if (changes.role) membership.role = changes.role as OrganizationRole;
   if (changes.status) membership.status = changes.status;
   await membership.save();
-  if (changes.name) {
-    user.name = changes.name;
-    await user.save();
+  if (changes.name) user.name = changes.name;
+  if (changes.password) {
+    user.passwordHash = await hashPassword(changes.password);
+    if (user.status === "invited") {
+      user.status = "active";
+      user.inviteTokenHash = undefined;
+      user.inviteExpiresAt = undefined;
+      if (membership.status === "invited") {
+        membership.status = "active";
+        await membership.save();
+      }
+    }
+  }
+  if (changes.name || changes.password) await user.save();
+  if (changes.password) {
+    // Existing sessions must sign in again with the new password
+    await RefreshToken.updateMany({ userId, revokedAt: null }, { $set: { revokedAt: new Date(), revokedReason: "password_reset" } });
   }
 
   if (changes.status === "suspended") {
@@ -130,8 +164,34 @@ export async function updateMember(
     resourceType: "settings",
     resourceId: userId,
     details: `Updated team member ${user.email}`,
-    metadata: { before, after: { role: membership.role, status: membership.status } },
+    metadata: { before, after: { role: membership.role, status: membership.status }, passwordReset: Boolean(changes.password) },
   });
 
   return toTeamMemberDto(user, membership);
+}
+
+/** Removes a member from the organization (the user account itself is kept). */
+export async function removeMember(actor: ActorContext, userId: string) {
+  if (userId === actor.userId) throw Errors.forbidden("You cannot remove yourself");
+  const membership = await userRepository.findMembership(actor.organizationId, userId);
+  if (!membership) throw Errors.notFound("Team member");
+  assertCanAssign(actor.userRole, membership.role);
+  if (membership.role === "ORGANIZATION_OWNER") {
+    const owners = await Membership.countDocuments({ organizationId: actor.organizationId, role: "ORGANIZATION_OWNER", status: "active" });
+    if (owners <= 1) throw Errors.conflict("An organization must keep at least one active owner");
+  }
+  const user = await User.findById(userId);
+
+  await Membership.deleteOne({ _id: membership._id, organizationId: actor.organizationId });
+  await RefreshToken.updateMany(
+    { userId, organizationId: actor.organizationId, revokedAt: null },
+    { $set: { revokedAt: new Date(), revokedReason: "membership_removed" } }
+  );
+  await recordAudit(actor, {
+    action: "user.removed",
+    resourceType: "settings",
+    resourceId: userId,
+    details: `Removed team member ${user?.email ?? userId}`,
+    metadata: { role: membership.role },
+  });
 }
