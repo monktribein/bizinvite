@@ -9,11 +9,13 @@ export function useRSVP(eventId?: string) {
   const rsvpListQuery = useQuery({
     queryKey: ["rsvps", eventId],
     queryFn: () => rsvpService.getRSVPs(eventId),
+    enabled: !!eventId,
   });
 
   const rsvpSummaryQuery = useQuery({
     queryKey: ["rsvp_summary", eventId],
     queryFn: () => rsvpService.getRSVPSummary(eventId),
+    enabled: !!eventId,
   });
 
   const updateRSVPMutation = useMutation({

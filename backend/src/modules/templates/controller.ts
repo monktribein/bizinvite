@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import { z } from "zod";
 import { TEMPLATE_APPROVAL_STATUSES } from "../../common/constants/enums";
 import { actorFromRequest } from "../../common/utils/context";
+import { isWhatsAppConfigured, isWhatsAppDryRun } from "../../config/whatsapp";
 import { sendSuccess } from "../../common/utils/response";
 import { parseId } from "../../common/validators/common";
 import { toTemplateDto } from "./model";
@@ -55,5 +56,10 @@ export async function createLocal(req: Request, res: Response) {
 }
 
 export function supportedVariables(req: Request, res: Response) {
-  sendSuccess(req, res, { variables: SUPPORTED_VARIABLES, quickReplyActions: QUICK_REPLY_ACTIONS });
+  sendSuccess(req, res, {
+    variables: SUPPORTED_VARIABLES,
+    quickReplyActions: QUICK_REPLY_ACTIONS,
+    // Lets the UI offer local test templates (dry-run) or Meta sync (live)
+    whatsapp: { configured: isWhatsAppConfigured(), dryRun: isWhatsAppDryRun() },
+  });
 }

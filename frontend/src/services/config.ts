@@ -1,8 +1,4 @@
 export const isMockEnabled = (): boolean => {
-  // If explicitly configured to false, use real API
-  if (process.env.NEXT_PUBLIC_USE_MOCK_API === "false") {
-    return false;
-  }
-  // Default to mock mode in local/dev or when unset
-  return true;
+  // Mock mode keeps data in browser memory only (lost on refresh), so it must be opted into explicitly
+  return process.env.NEXT_PUBLIC_USE_MOCK_API === "true";
 };

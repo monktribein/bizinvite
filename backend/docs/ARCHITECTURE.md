@@ -66,7 +66,7 @@ issues tokens for another membership. Users can only grant roles at or below the
 
 ## Authentication
 
-- Passwords: bcrypt, cost 12, with a policy of at least 10 characters mixing upper-case, lower-case and digits.
+- Passwords: bcrypt, cost 12, with no strength policy (any non-empty password is accepted).
   Unknown emails still run a bcrypt compare, so timing does not reveal which emails exist.
 - Access token: JWT (default 15 min). Refresh token: JWT (default 30 days), stored only as a SHA-256 hash and
   rotated on every refresh. Tokens from one login share a `familyId`: reusing a rotated token revokes the whole family.

@@ -19,6 +19,8 @@ export const createCampaignSchema = z.object({
   templateId: objectIdSchema,
   scheduledFor: isoDateSchema.optional(),
   targetSegment: targetSegmentSchema,
+  /** Image or video uploaded via POST /campaigns/media, sent as the template header. */
+  mediaId: objectIdSchema.optional(),
   /**
    * The frontend "launch" flow creates and sends in one call: without scheduledFor the
    * campaign starts immediately. Pass draft=true to only save it.
@@ -32,6 +34,8 @@ export const updateCampaignSchema = z
     templateId: objectIdSchema,
     scheduledFor: isoDateSchema.nullable(),
     targetSegment: targetSegmentSchema,
+    /** null removes the attachment. */
+    mediaId: objectIdSchema.nullable(),
   })
   .partial();
 
@@ -43,6 +47,13 @@ export const listCampaignsQuerySchema = z.object({
 export const recipientsQuerySchema = z.object({ status: z.enum(RECIPIENT_STATUSES).optional() });
 
 export const testSendSchema = z.object({ mobile: z.string().trim().min(8).max(32) });
+
+/** Test send from the campaign form, before the campaign is created. */
+export const draftTestSendSchema = testSendSchema.extend({
+  eventId: objectIdSchema,
+  templateId: objectIdSchema,
+  mediaId: objectIdSchema.optional(),
+});
 
 export type CreateCampaignInput = z.infer<typeof createCampaignSchema>;
 export type UpdateCampaignInput = z.infer<typeof updateCampaignSchema>;

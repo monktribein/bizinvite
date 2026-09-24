@@ -58,13 +58,17 @@ export function unmappedVariables(template: Pick<TemplateDoc, "variables">): str
 export function buildTemplateComponents(
   template: Pick<TemplateDoc, "variables" | "namedParameters" | "headerType" | "headerMediaUrl" | "buttons">,
   context: VariableContext,
-  options: { eventGuestId?: string; headerMediaUrl?: string } = {}
+  options: { eventGuestId?: string; headerMediaUrl?: string; headerMedia?: { type: "image" | "video"; id: string } } = {}
 ): TemplateComponent[] {
   const components: TemplateComponent[] = [];
 
   const mediaUrl = options.headerMediaUrl ?? template.headerMediaUrl ?? undefined;
   const headerType = template.headerType ?? "NONE";
-  if (["IMAGE", "VIDEO", "DOCUMENT"].includes(headerType) && mediaUrl) {
+  if (options.headerMedia) {
+    // Uploaded campaign media; the campaign already checked it matches the template header
+    const key = options.headerMedia.type;
+    components.push({ type: "header", parameters: [{ type: key, [key]: { id: options.headerMedia.id } }] });
+  } else if (["IMAGE", "VIDEO", "DOCUMENT"].includes(headerType) && mediaUrl) {
     const key = headerType.toLowerCase();
     components.push({ type: "header", parameters: [{ type: key, [key]: { link: mediaUrl } }] });
   }

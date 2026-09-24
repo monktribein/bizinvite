@@ -7,7 +7,7 @@ import { normalizeMobile } from "../../common/utils/mobile";
 import type { Pagination } from "../../common/validators/common";
 import { cancelPendingJobs, enqueueJob } from "../../scheduler/jobs";
 import { recordAudit } from "../audit";
-import { sendTemplateToGuest } from "../conversations/messaging.service";
+import { phoneNumberIdFor, sendTemplateToGuest } from "../conversations/messaging.service";
 import { INVALID_RECIPIENT_CODES, WhatsAppSendError } from "../conversations/whatsapp.client";
 import { Event } from "../events/model";
 import { findEventOrThrow } from "../events/service";
@@ -16,8 +16,15 @@ import { EventGuest, Guest } from "../guests/model";
 import { Organization } from "../organizations/model";
 import { EventSession } from "../sessions/model";
 import { buildVariableContext } from "../templates/context";
-import { Template } from "../templates/model";
+import { Template, TemplateDoc } from "../templates/model";
 import { assertTemplateSendable, findTemplateOrThrow } from "../templates/service";
+import {
+  assertMediaMatchesTemplate,
+  CampaignMediaType,
+  ensureWhatsAppMedia,
+  resolveCampaignMedia,
+  uploadStoredMediaToWhatsApp,
+} from "./media";
 import { Campaign, CampaignDoc, CampaignRecipient } from "./model";
 import type { CreateCampaignInput, UpdateCampaignInput } from "./schema";
 
@@ -80,6 +87,9 @@ async function toCampaignDtos(organizationId: string, campaigns: CampaignDoc[]) 
         groupIds: (c.targetSegment?.groupIds ?? []).map(String),
         onlyUninvited: c.targetSegment?.onlyUninvited ?? undefined,
       },
+      media: c.media?.fileId
+        ? { id: String(c.media.fileId), type: c.media.type, mimeType: c.media.mimeType, size: c.media.size, filename: c.media.filename ?? undefined }
+        : undefined,
       scheduledFor: c.scheduledFor?.toISOString(),
       startedAt: c.startedAt?.toISOString(),
       completedAt: c.completedAt?.toISOString(),
@@ -149,6 +159,8 @@ export async function createCampaign(actor: ActorContext, input: CreateCampaignI
   const template = await findTemplateOrThrow(actor.organizationId, input.templateId);
   assertTemplateSendable(template);
   await validateSegment(actor.organizationId, input.eventId, input.targetSegment);
+  const media = input.mediaId ? await resolveCampaignMedia(actor.organizationId, input.mediaId) : undefined;
+  assertMediaMatchesTemplate(template, media?.type);
 
   const scheduled = input.scheduledFor && input.scheduledFor.getTime() > Date.now();
   const status = input.draft ? "draft" : scheduled ? "scheduled" : "running";
@@ -160,6 +172,7 @@ export async function createCampaign(actor: ActorContext, input: CreateCampaignI
     templateName: template.name,
     status,
     targetSegment: input.targetSegment,
+    media,
     scheduledFor: input.scheduledFor,
     startedAt: status === "running" ? new Date() : undefined,
     createdBy: actor.userId,
@@ -171,7 +184,7 @@ export async function createCampaign(actor: ActorContext, input: CreateCampaignI
     resourceType: "campaign",
     resourceId: campaign.id,
     details: `${status === "running" ? "Launched" : status === "scheduled" ? "Scheduled" : "Created"} campaign "${campaign.name}"`,
-    metadata: { status, scheduledFor: input.scheduledFor, templateName: template.name, eventId: event.id },
+    metadata: { status, scheduledFor: input.scheduledFor, templateName: template.name, eventId: event.id, mediaType: media?.type },
   });
   return getCampaign(actor.organizationId, campaign.id);
 }
@@ -184,6 +197,13 @@ export async function updateCampaign(actor: ActorContext, campaignId: string, ch
     assertTemplateSendable(template);
     campaign.templateId = template._id;
     campaign.templateName = template.name;
+  }
+  if (changes.mediaId !== undefined) {
+    campaign.set("media", changes.mediaId ? await resolveCampaignMedia(actor.organizationId, changes.mediaId) : undefined);
+  }
+  if (changes.templateId || changes.mediaId !== undefined) {
+    const template = await findTemplateOrThrow(actor.organizationId, String(campaign.templateId));
+    assertMediaMatchesTemplate(template, campaign.media?.type as CampaignMediaType | undefined);
   }
   if (changes.targetSegment) {
     await validateSegment(actor.organizationId, String(campaign.eventId), changes.targetSegment);
@@ -206,7 +226,9 @@ export async function updateCampaign(actor: ActorContext, campaignId: string, ch
 export async function sendCampaign(actor: ActorContext, campaignId: string) {
   const campaign = await findCampaignOrThrow(actor.organizationId, campaignId);
   if (!["draft", "scheduled"].includes(campaign.status)) throw Errors.conflict(`A ${campaign.status} campaign cannot be sent`);
-  assertTemplateSendable(await findTemplateOrThrow(actor.organizationId, String(campaign.templateId)));
+  const template = await findTemplateOrThrow(actor.organizationId, String(campaign.templateId));
+  assertTemplateSendable(template);
+  assertMediaMatchesTemplate(template, campaign.media?.type as CampaignMediaType | undefined);
   campaign.dispatchGeneration += 1;
   campaign.scheduledFor = undefined;
   campaign.status = "running";
@@ -309,32 +331,77 @@ export async function listRecipients(organizationId: string, campaignId: string,
   };
 }
 
-/** Sends the campaign template to an arbitrary number for preview. Not counted in metrics. */
-export async function sendTestMessage(actor: ActorContext, campaignId: string, rawMobile: string) {
-  const campaign = await findCampaignOrThrow(actor.organizationId, campaignId);
-  const template = await findTemplateOrThrow(actor.organizationId, String(campaign.templateId));
-  assertTemplateSendable(template);
+/** Sends a template with sample guest data to one number. Returns the normalized number. */
+async function sendTestTemplate(
+  actor: ActorContext,
+  input: {
+    eventId: string;
+    template: TemplateDoc;
+    rawMobile: string;
+    headerMediaFor: (phoneNumberId: string | undefined) => Promise<{ type: CampaignMediaType; id: string } | undefined>;
+    campaignId?: CampaignDoc["_id"];
+  }
+) {
+  assertTemplateSendable(input.template);
   const org = await Organization.findById(actor.organizationId);
-  const mobile = normalizeMobile(rawMobile, org?.settings?.defaultCountryCode ?? "91");
+  const mobile = normalizeMobile(input.rawMobile, org?.settings?.defaultCountryCode ?? "91");
   if (!mobile.valid) throw Errors.validation("Invalid mobile number", { mobile: [mobile.error] });
-  const event = await findEventOrThrow(actor.organizationId, String(campaign.eventId));
+  const event = await findEventOrThrow(actor.organizationId, input.eventId);
   try {
+    const headerMedia = await input.headerMediaFor(await phoneNumberIdFor(actor.organizationId));
     await sendTemplateToGuest({
       organizationId: actor.organizationId,
       mobile: mobile.e164,
       guestName: "Test recipient",
+      headerMedia,
       eventId: event._id,
-      template,
+      template: input.template,
       context: buildVariableContext({ event, invitation: { name: "Test Guest", allowedCompanions: 1 }, organizationName: org?.name }),
       purpose: "test",
-      campaignId: campaign._id,
+      campaignId: input.campaignId,
     });
   } catch (err) {
     if (err instanceof WhatsAppSendError) throw Errors.whatsapp(`Test message failed: ${err.message}`, { code: err.code });
     throw err;
   }
-  await recordAudit(actor, { action: "campaign.test_sent", resourceType: "campaign", resourceId: campaign.id, details: `Sent test message to ${mobile.e164}` });
+  return mobile.e164;
+}
+
+/** Sends the campaign template to an arbitrary number for preview. Not counted in metrics. */
+export async function sendTestMessage(actor: ActorContext, campaignId: string, rawMobile: string) {
+  const campaign = await findCampaignOrThrow(actor.organizationId, campaignId);
+  const template = await findTemplateOrThrow(actor.organizationId, String(campaign.templateId));
+  assertMediaMatchesTemplate(template, campaign.media?.type as CampaignMediaType | undefined);
+  const mobile = await sendTestTemplate(actor, {
+    eventId: String(campaign.eventId),
+    template,
+    rawMobile,
+    headerMediaFor: (phoneNumberId) => ensureWhatsAppMedia(campaign, phoneNumberId),
+    campaignId: campaign._id,
+  });
+  await recordAudit(actor, { action: "campaign.test_sent", resourceType: "campaign", resourceId: campaign.id, details: `Sent test message to ${mobile}` });
   return { success: true, message: "Test WhatsApp message sent" };
+}
+
+/** Test send from the campaign form: uses the chosen event, template and attachment before the campaign exists. */
+export async function sendDraftTestMessage(actor: ActorContext, input: { eventId: string; templateId: string; mediaId?: string; mobile: string }) {
+  const template = await findTemplateOrThrow(actor.organizationId, input.templateId);
+  const media = input.mediaId ? await resolveCampaignMedia(actor.organizationId, input.mediaId) : undefined;
+  assertMediaMatchesTemplate(template, media?.type);
+  const mobile = await sendTestTemplate(actor, {
+    eventId: input.eventId,
+    template,
+    rawMobile: input.mobile,
+    headerMediaFor: async (phoneNumberId) =>
+      input.mediaId ? uploadStoredMediaToWhatsApp(actor.organizationId, input.mediaId, phoneNumberId) : undefined,
+  });
+  await recordAudit(actor, {
+    action: "campaign.test_sent",
+    resourceType: "campaign",
+    details: `Sent test message to ${mobile} using template "${template.name}"`,
+    metadata: { eventId: input.eventId, templateId: input.templateId, mediaType: media?.type },
+  });
+  return { success: true, message: `Test WhatsApp message sent to ${mobile}` };
 }
 
 // ---------------------------------------------------------------------------
@@ -445,6 +512,20 @@ export async function dispatchCampaign(
     { $set: { status: "failed", failedAt: new Date(), errorMessage: "Send interrupted; delivery unknown" } }
   );
 
+  // Upload the attachment to WhatsApp once, before parallel sends reuse its media id.
+  try {
+    await ensureWhatsAppMedia(campaign, await phoneNumberIdFor(data.organizationId));
+  } catch (err) {
+    if (err instanceof WhatsAppSendError && err.permanent) {
+      await Campaign.updateOne(
+        { _id: campaign._id, organizationId: data.organizationId },
+        { $set: { status: "failed", failureReason: `Invitation media upload failed: ${err.message}`.slice(0, 500) } }
+      );
+      return { skipped: "media_upload_failed" };
+    }
+    throw err;
+  }
+
   const batch = await CampaignRecipient.find({ organizationId: data.organizationId, campaignId: campaign._id, status: "pending", claimedAt: { $exists: false } })
     .sort({ _id: 1 })
     .limit(batchSize)
@@ -539,8 +620,10 @@ export async function sendCampaignRecipient(data: { organizationId: string; camp
     : [];
 
   try {
+    const headerMedia = await ensureWhatsAppMedia(campaign, await phoneNumberIdFor(data.organizationId));
     const message = await sendTemplateToGuest({
       organizationId: data.organizationId,
+      headerMedia,
       mobile: contact!.mobile,
       guestName: contact!.name,
       guestId: contact!._id,

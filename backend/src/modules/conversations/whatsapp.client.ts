@@ -51,17 +51,18 @@ interface GraphError {
   error?: { message?: string; code?: number; error_subcode?: number; error_data?: { details?: string } };
 }
 
-async function graphRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+async function graphRequest<T>(path: string, init: RequestInit = {}, timeoutMs = 15000): Promise<T> {
   if (!whatsappConfig.accessToken) throw Errors.whatsapp("WhatsApp Cloud API is not configured");
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 15000);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(`${whatsappConfig.graphBaseUrl}/${whatsappConfig.apiVersion}/${path}`, {
       ...init,
       signal: controller.signal,
       headers: {
         Authorization: `Bearer ${whatsappConfig.accessToken}`,
-        "Content-Type": "application/json",
+        // fetch sets the multipart boundary itself for FormData bodies
+        ...(init.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
         ...(init.headers ?? {}),
       },
     });
@@ -109,6 +110,25 @@ export async function sendTemplateMessage(input: {
   const waMessageId = body.messages?.[0]?.id;
   if (!waMessageId) throw new WhatsAppSendError("WhatsApp did not return a message id", undefined, false);
   return { waMessageId, dryRun: false };
+}
+
+/** Uploads a file to WhatsApp and returns its media id (valid for 30 days). */
+export async function uploadMedia(input: { phoneNumberId?: string; buffer: Buffer; mimeType: string; filename: string }): Promise<string> {
+  if (isWhatsAppDryRun()) {
+    const mediaId = `dryrun-media.${randomUUID()}`;
+    logger.info({ mediaId, mimeType: input.mimeType, bytes: input.buffer.length }, "WhatsApp dry-run: media not uploaded");
+    return mediaId;
+  }
+  const phoneNumberId = input.phoneNumberId ?? whatsappConfig.phoneNumberId;
+  if (!phoneNumberId) throw new WhatsAppSendError("No WhatsApp phone number id configured", undefined, true);
+
+  const form = new FormData();
+  form.append("messaging_product", "whatsapp");
+  form.append("type", input.mimeType);
+  form.append("file", new Blob([new Uint8Array(input.buffer)], { type: input.mimeType }), input.filename);
+  const body = await graphRequest<{ id?: string }>(`${phoneNumberId}/media`, { method: "POST", body: form }, 60000);
+  if (!body.id) throw new WhatsAppSendError("WhatsApp did not return a media id", undefined, false);
+  return body.id;
 }
 
 export interface RemoteTemplate {

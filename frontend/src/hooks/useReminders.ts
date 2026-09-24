@@ -8,6 +8,7 @@ export function useReminders(eventId?: string) {
   const rulesQuery = useQuery({
     queryKey: ["reminder_rules", eventId],
     queryFn: () => reminderService.getReminderRules(eventId),
+    enabled: !!eventId,
   });
 
   const createRuleMutation = useMutation({

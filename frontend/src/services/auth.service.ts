@@ -30,7 +30,13 @@ export const authService = {
       return;
     }
     try {
-      await apiClient.post("/api/v1/auth/logout");
+      // Best-effort server revoke; an expired or missing session must not block signing out locally
+      if (typeof window !== "undefined" && localStorage.getItem("bizinvite_access_token")) {
+        const refreshToken = localStorage.getItem("bizinvite_refresh_token") ?? undefined;
+        await apiClient.post("/api/v1/auth/logout", { refreshToken });
+      }
+    } catch {
+      // Session already invalid server-side; nothing to revoke
     } finally {
       if (typeof window !== "undefined") {
         localStorage.removeItem("bizinvite_access_token");

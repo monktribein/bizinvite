@@ -5,31 +5,37 @@ export function useReports(eventId?: string) {
   const invitationFunnelQuery = useQuery({
     queryKey: ["report_invitation_funnel", eventId],
     queryFn: () => reportService.getInvitationFunnel(eventId),
+    enabled: !!eventId,
   });
 
   const rsvpQuery = useQuery({
     queryKey: ["report_rsvp", eventId],
     queryFn: () => reportService.getRSVPReport(eventId),
+    enabled: !!eventId,
   });
 
   const attendanceQuery = useQuery({
     queryKey: ["report_attendance", eventId],
     queryFn: () => reportService.getAttendanceReport(eventId),
+    enabled: !!eventId,
   });
 
   const reminderQuery = useQuery({
     queryKey: ["report_reminders", eventId],
     queryFn: () => reportService.getReminderReport(eventId),
+    enabled: !!eventId,
   });
 
   const failureQuery = useQuery({
     queryKey: ["report_failures", eventId],
     queryFn: () => reportService.getDeliveryFailureReport(eventId),
+    enabled: !!eventId,
   });
 
   const summaryQuery = useQuery({
     queryKey: ["report_summary", eventId],
     queryFn: () => reportService.getEventSummaryReport(eventId),
+    enabled: !!eventId,
   });
 
   return {

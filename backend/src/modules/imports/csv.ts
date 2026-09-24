@@ -124,11 +124,11 @@ export function validateRow(
   }
 
   const rawCategory = value("category");
-  let category: GuestCategory = "General";
+  let category: GuestCategory = "Family";
   if (rawCategory) {
     const match = GUEST_CATEGORIES.find((c) => c.toLowerCase() === rawCategory.toLowerCase());
     if (match) category = match;
-    else issues.push({ rowNumber, field: "category", message: `Unknown category "${rawCategory}", using General`, severity: "warning" });
+    else issues.push({ rowNumber, field: "category", message: `Unknown category "${rawCategory}", using Family`, severity: "warning" });
   }
 
   const rawCompanions = value("allowedCompanions");

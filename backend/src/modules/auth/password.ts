@@ -3,11 +3,8 @@ import { z } from "zod";
 
 const BCRYPT_ROUNDS = 12;
 
-export const passwordSchema = z
-  .string()
-  .min(10, "Password must be at least 10 characters")
-  .max(128, "Password must be at most 128 characters")
-  .refine((v) => /[a-z]/.test(v) && /[A-Z]/.test(v) && /\d/.test(v), "Password must include upper-case, lower-case and a number");
+// No strength rules: any non-empty password is accepted.
+export const passwordSchema = z.string().min(1, "Password is required").max(128, "Password must be at most 128 characters");
 
 export function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, BCRYPT_ROUNDS);

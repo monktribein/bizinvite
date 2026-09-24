@@ -1,11 +1,12 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect } from "react";
+import React, { createContext, useCallback, useContext, useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { User, Permission } from "@/types/auth";
 import { Organization } from "@/types/organization";
 import { authService } from "@/services/auth.service";
 import { organizationService } from "@/services/organization.service";
+import { isMockEnabled } from "@/services/config";
 import { can as canCheck } from "./permissions";
 
 interface AuthContextType {
@@ -27,13 +28,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [organization, setOrganization] = useState<Organization | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [currentEventId, setCurrentEventId] = useState<string>("evt_sharma_wedding_2026");
+  // Empty until the header picks one of the organization's real events
+  const [currentEventId, setCurrentEventIdState] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    return localStorage.getItem("bizinvite_current_event_id") ?? "";
+  });
+
+  const setCurrentEventId = useCallback((eventId: string) => {
+    setCurrentEventIdState(eventId);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("bizinvite_current_event_id", eventId);
+    }
+  }, []);
 
   useEffect(() => {
     async function initAuth() {
       try {
         const storedToken = typeof window !== "undefined" ? localStorage.getItem("bizinvite_access_token") : null;
-        if (storedToken || process.env.NEXT_PUBLIC_USE_MOCK_API !== "false") {
+        if (storedToken || isMockEnabled()) {
           const currentUser = await authService.getCurrentUser();
           setUser(currentUser);
           if (currentUser.organizationId) {
@@ -42,13 +54,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         }
       } catch (err) {
-        console.error("Auth initialization failed:", err);
+        console.warn("Auth initialization failed (session may be expired):", err);
+        if (typeof window !== "undefined") {
+          localStorage.removeItem("bizinvite_access_token");
+          localStorage.removeItem("bizinvite_refresh_token");
+          localStorage.removeItem("bizinvite_current_user_email");
+        }
+        setUser(null);
+        setOrganization(null);
+        if (typeof window !== "undefined" && window.location.pathname.startsWith("/dashboard")) {
+          router.replace("/login");
+        }
       } finally {
         setIsLoading(false);
       }
     }
     initAuth();
-  }, []);
+  }, [router]);
 
   const login = async (email: string, password?: string) => {
     setIsLoading(true);
@@ -69,10 +91,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const logout = async () => {
-    await authService.logout();
-    setUser(null);
-    setOrganization(null);
-    router.push("/login");
+    try {
+      await authService.logout();
+    } finally {
+      setUser(null);
+      setOrganization(null);
+      router.push("/login");
+    }
   };
 
   const can = (permission: Permission) => {

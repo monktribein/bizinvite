@@ -20,6 +20,8 @@ export interface OutboundTemplateInput {
   template: TemplateDoc;
   context: VariableContext;
   headerMediaUrl?: string;
+  /** WhatsApp media id of an uploaded image/video sent as the header. */
+  headerMedia?: { type: "image" | "video"; id: string };
   purpose: "campaign" | "reminder" | "pass" | "test";
   campaignId?: Id;
   campaignRecipientId?: Id;
@@ -28,7 +30,7 @@ export interface OutboundTemplateInput {
   passId?: Id;
 }
 
-async function phoneNumberIdFor(organizationId: string): Promise<string | undefined> {
+export async function phoneNumberIdFor(organizationId: string): Promise<string | undefined> {
   const org = await Organization.findById(organizationId).select("whatsApp.phoneNumberId");
   return org?.whatsApp?.phoneNumberId ?? whatsappConfig.phoneNumberId;
 }
@@ -112,6 +114,7 @@ export async function sendTemplateToGuest(input: OutboundTemplateInput): Promise
       components: buildTemplateComponents(input.template, input.context, {
         eventGuestId: input.eventGuestId ? String(input.eventGuestId) : undefined,
         headerMediaUrl: input.headerMediaUrl,
+        headerMedia: input.headerMedia,
       }),
     });
     message.set({ waMessageId: result.waMessageId, status: "sent", sentAt: new Date(), dryRun: result.dryRun });

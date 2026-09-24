@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { campaignService } from "@/services/campaign.service";
-import { Campaign } from "@/types/campaign";
+import { CreateCampaignInput, CreateLocalTemplateInput } from "@/types/campaign";
 
 export function useCampaigns(eventId?: string) {
   const queryClient = useQueryClient();
@@ -8,6 +8,7 @@ export function useCampaigns(eventId?: string) {
   const campaignsQuery = useQuery({
     queryKey: ["campaigns", eventId],
     queryFn: () => campaignService.getCampaigns(eventId),
+    enabled: !!eventId,
   });
 
   const templatesQuery = useQuery({
@@ -15,8 +16,27 @@ export function useCampaigns(eventId?: string) {
     queryFn: () => campaignService.getTemplates(),
   });
 
+  const capabilitiesQuery = useQuery({
+    queryKey: ["template_capabilities"],
+    queryFn: () => campaignService.getTemplateCapabilities(),
+  });
+
+  const createTemplateMutation = useMutation({
+    mutationFn: (input: CreateLocalTemplateInput) => campaignService.createLocalTemplate(input),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["templates"] });
+    },
+  });
+
+  const syncTemplatesMutation = useMutation({
+    mutationFn: () => campaignService.syncTemplates(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["templates"] });
+    },
+  });
+
   const createCampaignMutation = useMutation({
-    mutationFn: (newCampaign: Partial<Campaign>) => campaignService.createCampaign(newCampaign),
+    mutationFn: (newCampaign: CreateCampaignInput) => campaignService.createCampaign(newCampaign),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["campaigns"] });
     },
@@ -41,6 +61,10 @@ export function useCampaigns(eventId?: string) {
     isLoadingCampaigns: campaignsQuery.isLoading,
     templates: templatesQuery.data || [],
     isLoadingTemplates: templatesQuery.isLoading,
+    templateCapabilities: capabilitiesQuery.data,
+    createTemplate: createTemplateMutation.mutateAsync,
+    syncTemplates: syncTemplatesMutation.mutateAsync,
+    isSyncingTemplates: syncTemplatesMutation.isPending,
     createCampaign: createCampaignMutation.mutateAsync,
     isCreating: createCampaignMutation.isPending,
     pauseCampaign: pauseCampaignMutation.mutateAsync,

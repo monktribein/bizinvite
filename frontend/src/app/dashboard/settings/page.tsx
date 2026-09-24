@@ -166,10 +166,6 @@ export default function SettingsPage() {
       setEditErrorMsg("Staff member name cannot be blank.");
       return;
     }
-    if (editPassword && editPassword.trim().length < 6) {
-      setEditErrorMsg("New password must be at least 6 characters.");
-      return;
-    }
 
     setIsUpdating(true);
     setEditErrorMsg("");
@@ -461,7 +457,7 @@ export default function SettingsPage() {
                     </Badge>
                   </div>
                   <p className="text-slate-500 text-[11px] mt-0.5 font-mono">
-                    Sender: {organization?.whatsAppStatus.phoneNumber || "+91 98200 12345"}
+                    Sender: {organization?.whatsAppStatus?.phoneNumber || "+91 98200 12345"}
                   </p>
                 </div>
               </div>
@@ -471,7 +467,7 @@ export default function SettingsPage() {
                   Quality Tier
                 </span>
                 <span className="font-bold text-slate-900">
-                  {organization?.whatsAppStatus.tier || "TIER_100K"} ({organization?.whatsAppStatus.qualityRating || "GREEN"})
+                  {organization?.whatsAppStatus?.tier || "TIER_100K"} ({organization?.whatsAppStatus?.qualityRating || "GREEN"})
                 </span>
               </div>
             </div>
@@ -479,13 +475,13 @@ export default function SettingsPage() {
             <div className="space-y-3 pt-2">
               <Input
                 label="WhatsApp Business Account ID (WABA ID)"
-                defaultValue={organization?.whatsAppStatus.wabaId || "waba_biz_998127391"}
+                defaultValue={organization?.whatsAppStatus?.wabaId || "waba_biz_998127391"}
                 readOnly
                 className="font-mono text-slate-600"
               />
               <Input
                 label="Verified Display Name"
-                defaultValue={organization?.whatsAppStatus.businessDisplayName || "Aura Events Concierge"}
+                defaultValue={organization?.whatsAppStatus?.businessDisplayName || "Aura Events Concierge"}
                 readOnly
               />
             </div>
@@ -806,12 +802,12 @@ export default function SettingsPage() {
               className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-600"
             />
             <p className="text-[11px] text-slate-500">
-              Admin can update or reset this user's password directly (min 6 characters).
+              Admin can update or reset this user's password directly.
             </p>
           </div>
 
           {/* Danger Zone: Suspend or Remove Staff */}
-          {editingMember?.role !== "ORGANIZATION_OWNER" && editingMember?.email.toLowerCase() !== "admin@bizinvite.com" && (
+          {editingMember?.role !== "ORGANIZATION_OWNER" && editingMember?.email?.toLowerCase() !== "admin@bizinvite.com" && (
             <div className="rounded-xl border border-rose-200 bg-rose-50/40 p-3.5">
               {!showDeleteConfirm ? (
                 <div className="flex items-center justify-between">

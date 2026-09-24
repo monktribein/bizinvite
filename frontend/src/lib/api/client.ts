@@ -120,6 +120,12 @@ class ApiClient {
             ...headers,
           },
         });
+      } else {
+        if (typeof window !== "undefined") {
+          localStorage.removeItem("bizinvite_access_token");
+          localStorage.removeItem("bizinvite_refresh_token");
+          localStorage.removeItem("bizinvite_current_user_email");
+        }
       }
     }
 

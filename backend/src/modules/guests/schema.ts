@@ -6,7 +6,7 @@ const contactFields = {
   name: z.string().trim().min(1, "Name is required").max(200),
   mobile: z.string().trim().min(1, "Mobile number is required").max(32),
   email: z.string().trim().toLowerCase().email("Enter a valid email address").max(254).optional().or(z.literal("").transform(() => undefined)),
-  category: z.enum(GUEST_CATEGORIES).default("General"),
+  category: z.enum(GUEST_CATEGORIES).default("Family"),
   isVip: z.boolean().default(false),
   city: z.string().trim().max(120).optional(),
   preferredLanguage: z.string().trim().max(40).optional(),

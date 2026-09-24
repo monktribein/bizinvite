@@ -30,6 +30,8 @@ export interface WhatsAppTemplate {
   language: string;
   category: "MARKETING" | "UTILITY" | "AUTHENTICATION";
   approvalStatus: TemplateApprovalStatus;
+  /** "local" templates exist only in WhatsApp dry-run mode. */
+  source?: "meta" | "local";
   headerType?: "TEXT" | "IMAGE" | "VIDEO" | "DOCUMENT" | "NONE";
   headerContent?: string;
   bodyText: string;
@@ -60,6 +62,23 @@ export interface CampaignMetrics {
   suppressed: number;
 }
 
+export type CampaignMediaType = "image" | "video";
+
+/** Image or video sent as the invitation template header. */
+export interface CampaignMedia {
+  id: string;
+  type: CampaignMediaType;
+  mimeType: string;
+  size: number;
+  filename?: string;
+}
+
+/** Accepted attachments; WhatsApp supports these formats in template headers. */
+export const CAMPAIGN_MEDIA_LIMITS: Record<CampaignMediaType, { maxBytes: number; mimeTypes: string[]; label: string }> = {
+  image: { maxBytes: 2 * 1024 * 1024, mimeTypes: ["image/jpeg", "image/png"], label: "2 MB" },
+  video: { maxBytes: 10 * 1024 * 1024, mimeTypes: ["video/mp4", "video/3gpp"], label: "10 MB" },
+};
+
 export interface Campaign {
   id: string;
   organizationId: string;
@@ -75,9 +94,27 @@ export interface Campaign {
     onlyVip?: boolean;
     sessionIds?: string[];
   };
+  media?: CampaignMedia;
   scheduledFor?: string;
   startedAt?: string;
   completedAt?: string;
   metrics: CampaignMetrics;
   createdAt: string;
+}
+
+/** Body for creating a campaign; mediaId comes from uploadCampaignMedia. */
+export type CreateCampaignInput = Partial<Omit<Campaign, "media">> & { mediaId?: string };
+
+/** Supported placeholder names and whether WhatsApp is live or in dry-run (local templates allowed). */
+export interface TemplateCapabilities {
+  variables: string[];
+  whatsapp: { configured: boolean; dryRun: boolean };
+}
+
+/** Local test template (dry-run only). Placeholders use supported names, e.g. {{guest_name}}. */
+export interface CreateLocalTemplateInput {
+  name: string;
+  language?: string;
+  bodyText: string;
+  buttons?: Array<{ type: "QUICK_REPLY"; text: string }>;
 }

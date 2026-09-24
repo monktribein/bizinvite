@@ -19,6 +19,24 @@ const campaignSchema = new Schema(
       /** Only guests who have never received an invitation message. */
       onlyUninvited: { type: Boolean },
     },
+    /** Optional image/video sent as the template header (file stored in the campaignMedia GridFS bucket). */
+    media: {
+      type: new Schema(
+        {
+          fileId: { type: Schema.Types.ObjectId, required: true },
+          type: { type: String, enum: ["image", "video"], required: true },
+          mimeType: { type: String, required: true },
+          size: { type: Number, required: true },
+          filename: { type: String },
+          /** WhatsApp media id from the one-time upload, reused for every recipient. */
+          waMediaId: { type: String },
+          waPhoneNumberId: { type: String, default: null },
+          waUploadedAt: { type: Date },
+        },
+        { _id: false }
+      ),
+      default: undefined,
+    },
     scheduledFor: { type: Date },
     startedAt: { type: Date },
     completedAt: { type: Date },

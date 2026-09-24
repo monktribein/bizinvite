@@ -19,7 +19,7 @@ export interface Guest {
   mobile: string;
   email?: string;
   familyGroupName?: string;
-  category: "VIP" | "VVIP" | "Family" | "Friend" | "Corporate" | "Vendor" | "General";
+  category: "VIP" | "VVIP" | "Family" | "Friend" | "Corporate" | "Vendor";
   isVip: boolean;
   city?: string;
   preferredLanguage: string;

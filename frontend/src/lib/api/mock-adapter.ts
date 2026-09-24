@@ -502,7 +502,7 @@ class MockAdapter {
       mobile: guestData.mobile || "+919999999999",
       email: guestData.email,
       familyGroupName: guestData.familyGroupName,
-      category: guestData.category || "General",
+      category: guestData.category || "Family",
       isVip: guestData.isVip || false,
       city: guestData.city,
       preferredLanguage: guestData.preferredLanguage || "English",
@@ -554,7 +554,7 @@ class MockAdapter {
         { csvHeader: "City", targetField: "city" },
       ],
       previewRows: [
-        { "Full Name": "Sample Invitee", "Mobile Number": "+919820011999", "Email Address": "sample@corp.in", "Guest Category": "General", "VIP Status (Y/N)": "N", "Allowed Pax": "1", City: "Mumbai" },
+        { "Full Name": "Sample Invitee", "Mobile Number": "+919820011999", "Email Address": "sample@corp.in", "Guest Category": "Family", "VIP Status (Y/N)": "N", "Allowed Pax": "1", City: "Mumbai" },
       ],
       validationIssues: [],
       duplicates: [],

@@ -7,6 +7,7 @@ export function useCheckIn(eventId?: string) {
   const summaryQuery = useQuery({
     queryKey: ["checkin_summary", eventId],
     queryFn: () => checkInService.getLiveSummary(eventId),
+    enabled: !!eventId,
     refetchInterval: 5000, // Poll summary every 5 seconds for live dashboard counters
   });
 

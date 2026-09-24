@@ -10,10 +10,10 @@ const CSV = [
   "Full Name,Mobile Number,Category,Companions,Family",
   "Asha Mehta,9820011111,VIP,2,Mehta Family",
   "Bala Iyer,+91 98200 22222,Corporate,0,",
-  "Bad Mobile,98200333,General,0,",
+  "Bad Mobile,98200333,Family,0,",
   "Asha Duplicate,09820011111,Family,1,",
   "Existing Guest,9820099999,Friend,1,",
-  ",9820055555,General,0,",
+  ",9820055555,Family,0,",
 ].join("\n");
 
 async function preview(t: Awaited<ReturnType<typeof setupTenant>>, csv = CSV, fileName = "guests.csv") {

@@ -4,6 +4,8 @@ import React, { useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthProvider } from "@/lib/auth/context";
 
+import { ApiError } from "@/lib/api/client";
+
 export function AppProviders({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(
     () =>
@@ -12,7 +14,12 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
           queries: {
             staleTime: 60 * 1000,
             refetchOnWindowFocus: false,
-            retry: 1,
+            retry: (failureCount, error) => {
+              if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+                return false;
+              }
+              return failureCount < 1;
+            },
           },
         },
       })

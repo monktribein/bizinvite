@@ -6,11 +6,13 @@ import { sendPaginated, sendSuccess } from "../../common/utils/response";
 import { paginationSchema, parseId } from "../../common/validators/common";
 import {
   createCampaignSchema,
+  draftTestSendSchema,
   listCampaignsQuerySchema,
   recipientsQuerySchema,
   testSendSchema,
   updateCampaignSchema,
 } from "./schema";
+import * as campaignMedia from "./media";
 import * as campaignService from "./service";
 
 export async function list(req: Request, res: Response) {
@@ -63,10 +65,29 @@ export async function test(req: Request, res: Response) {
   sendSuccess(req, res, await campaignService.sendTestMessage(actorFromRequest(req), id, mobile));
 }
 
+export async function testDraft(req: Request, res: Response) {
+  sendSuccess(req, res, await campaignService.sendDraftTestMessage(actorFromRequest(req), draftTestSendSchema.parse(req.body)));
+}
+
 export async function recipients(req: Request, res: Response) {
   const id = parseId(req.params.id, "Campaign");
   const page = paginationSchema.parse(req.query);
   const filters = recipientsQuerySchema.parse(req.query);
   const { items, total } = await campaignService.listRecipients(req.tenant!.organizationId, id, filters, page);
   sendPaginated(req, res, items, { ...page, total });
+}
+
+export async function uploadMedia(req: Request, res: Response) {
+  if (!req.file) throw Errors.validation("Attach an image or video file", { file: ["File is required"] });
+  sendSuccess(req, res, await campaignMedia.saveCampaignMedia(actorFromRequest(req), req.file), { status: 201, message: "Media uploaded" });
+}
+
+export async function getMediaFile(req: Request, res: Response) {
+  const id = parseId(req.params.mediaId, "Media");
+  const { media, stream } = await campaignMedia.openCampaignMediaStream(req.tenant!.organizationId, id);
+  res.setHeader("Content-Type", media.mimeType);
+  res.setHeader("Content-Length", String(media.size));
+  res.setHeader("Cache-Control", "private, max-age=3600");
+  stream.on("error", () => res.destroy());
+  stream.pipe(res);
 }

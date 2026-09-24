@@ -20,7 +20,7 @@ const guestSchema = new Schema(
     /** E.164 */
     mobile: { type: String, required: true },
     email: { type: String, lowercase: true, trim: true },
-    category: { type: String, enum: GUEST_CATEGORIES, default: "General" },
+    category: { type: String, enum: GUEST_CATEGORIES, default: "Family" },
     isVip: { type: Boolean, default: false },
     city: { type: String },
     preferredLanguage: { type: String, default: "English" },
@@ -59,7 +59,7 @@ const eventGuestSchema = new Schema(
 
     name: { type: String, required: true },
     mobile: { type: String, required: true },
-    category: { type: String, enum: GUEST_CATEGORIES, default: "General" },
+    category: { type: String, enum: GUEST_CATEGORIES, default: "Family" },
     isVip: { type: Boolean, default: false },
 
     invitedSessionIds: [{ type: Schema.Types.ObjectId, ref: "EventSession" }],

@@ -7,6 +7,7 @@ export function usePasses(eventId?: string) {
   const passesQuery = useQuery({
     queryKey: ["passes", eventId],
     queryFn: () => passService.getPasses(eventId),
+    enabled: !!eventId,
   });
 
   const resendPassMutation = useMutation({

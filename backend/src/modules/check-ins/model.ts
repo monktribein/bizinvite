@@ -43,7 +43,7 @@ export function toCheckInDto(c: CheckInDoc) {
     guestName: c.guestName,
     guestMobile: c.guestMobile ?? "",
     isVip: c.isVip,
-    category: c.category ?? "General",
+    category: c.category ?? "Family",
     eventId: String(c.eventId),
     gateId: c.gateId,
     gateName: c.gateName,

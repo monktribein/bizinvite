@@ -6,7 +6,7 @@ export type EventStatus = (typeof EVENT_STATUSES)[number];
 export const EVENT_CATEGORIES = ["wedding", "corporate", "conference", "social", "other"] as const;
 export type EventCategory = (typeof EVENT_CATEGORIES)[number];
 
-export const GUEST_CATEGORIES = ["VIP", "VVIP", "Family", "Friend", "Corporate", "Vendor", "General"] as const;
+export const GUEST_CATEGORIES = ["VIP", "VVIP", "Family", "Friend", "Corporate", "Vendor"] as const;
 export type GuestCategory = (typeof GUEST_CATEGORIES)[number];
 
 export const CONSENT_SOURCES = ["csv_import", "manual_entry", "whatsapp_opt_in", "external_form"] as const;

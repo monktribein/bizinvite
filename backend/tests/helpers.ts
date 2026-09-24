@@ -116,7 +116,7 @@ export async function createGuest(tenant: Tenant, eventId: string, overrides: Re
     eventId,
     name: `Guest ${++seq}`,
     mobile: `98${String(10000000 + seq).slice(-8)}`,
-    category: "General",
+    category: "Family",
     allowedCompanions: 1,
     ...overrides,
   });

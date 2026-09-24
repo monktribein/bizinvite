@@ -160,6 +160,13 @@ export async function createLocalTemplate(
   const { names, named } = extractPlaceholders(input.bodyText);
   const variables = input.variables ?? (named ? names : names.map((n) => `var_${n}`));
   if (variables.length !== names.length) throw Errors.validation("Variable count does not match placeholders", { variables: ["Count mismatch"] });
+  // A placeholder with no business field could never be filled, so the template could never be sent
+  const unknown = unmappedVariables({ variables });
+  if (unknown.length) {
+    throw Errors.validation(`Unknown placeholders: ${unknown.map((v) => `{{${v}}}`).join(", ")}. Use supported names such as {{guest_name}} or {{event_name}}.`, {
+      bodyText: [`Unknown placeholders: ${unknown.join(", ")}`],
+    });
+  }
   const template = await Template.create({
     ...input,
     organizationId: actor.organizationId,

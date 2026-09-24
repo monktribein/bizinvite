@@ -6,6 +6,7 @@ import { useGuests } from "@/hooks/useGuests";
 import { useAuth } from "@/lib/auth/context";
 import { Guest, ImportPreviewResult } from "@/types/guest";
 import { guestService } from "@/services/guest.service";
+import { ApiError } from "@/lib/api/client";
 import { Card, CardContent } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -70,11 +71,12 @@ export default function GuestsPage() {
   const [guestName, setGuestName] = useState("");
   const [guestMobile, setGuestMobile] = useState("");
   const [guestEmail, setGuestEmail] = useState("");
-  const [guestCategory, setGuestCategory] = useState<Guest["category"]>("General");
+  const [guestCategory, setGuestCategory] = useState<Guest["category"]>("Family");
   const [isVip, setIsVip] = useState(false);
   const [allowedPax, setAllowedPax] = useState(1);
   const [city, setCity] = useState("");
   const [notes, setNotes] = useState("");
+  const [guestErrorMsg, setGuestErrorMsg] = useState("");
 
   // CSV Import Wizard Modal State
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
@@ -89,11 +91,12 @@ export default function GuestsPage() {
     setGuestName("");
     setGuestMobile("+91 ");
     setGuestEmail("");
-    setGuestCategory("General");
+    setGuestCategory("Family");
     setIsVip(false);
     setAllowedPax(1);
     setCity("");
     setNotes("");
+    setGuestErrorMsg("");
     setIsGuestModalOpen(true);
   };
 
@@ -107,15 +110,35 @@ export default function GuestsPage() {
     setAllowedPax(guest.allowedCompanions + 1);
     setCity(guest.city || "");
     setNotes(guest.notes || "");
+    setGuestErrorMsg("");
     setIsGuestModalOpen(true);
   };
 
   const handleSaveGuest = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (editingGuest) {
-      await updateGuest({
-        id: editingGuest.id,
-        updates: {
+    setGuestErrorMsg("");
+    if (!editingGuest && !currentEventId) {
+      setGuestErrorMsg("Create or select an event before adding guests.");
+      return;
+    }
+    try {
+      if (editingGuest) {
+        await updateGuest({
+          id: editingGuest.id,
+          updates: {
+            name: guestName,
+            mobile: guestMobile,
+            email: guestEmail || undefined,
+            category: guestCategory,
+            isVip,
+            allowedCompanions: Math.max(0, allowedPax - 1),
+            city,
+            notes,
+          },
+        });
+      } else {
+        await addGuest({
+          eventId: currentEventId,
           name: guestName,
           mobile: guestMobile,
           email: guestEmail || undefined,
@@ -124,22 +147,16 @@ export default function GuestsPage() {
           allowedCompanions: Math.max(0, allowedPax - 1),
           city,
           notes,
-        },
-      });
-    } else {
-      await addGuest({
-        eventId: currentEventId,
-        name: guestName,
-        mobile: guestMobile,
-        email: guestEmail || undefined,
-        category: guestCategory,
-        isVip,
-        allowedCompanions: Math.max(0, allowedPax - 1),
-        city,
-        notes,
-      });
+        });
+      }
+      setIsGuestModalOpen(false);
+    } catch (err) {
+      if (err instanceof ApiError && err.fields) {
+        setGuestErrorMsg(Object.values(err.fields).flat().join(" "));
+      } else {
+        setGuestErrorMsg(err instanceof Error ? err.message : "Could not save guest.");
+      }
     }
-    setIsGuestModalOpen(false);
   };
 
   // CSV Upload Simulation
@@ -451,6 +468,9 @@ export default function GuestsPage() {
         description="Configure guest profile, allowed companions, and contact information."
       >
         <form onSubmit={handleSaveGuest} className="space-y-4">
+          {guestErrorMsg && (
+            <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{guestErrorMsg}</p>
+          )}
           <Input
             label="Full Name / Head of Family"
             required
@@ -483,7 +503,6 @@ export default function GuestsPage() {
               value={guestCategory}
               onChange={(e) => setGuestCategory(e.target.value as Guest["category"])}
               options={[
-                { label: "General", value: "General" },
                 { label: "Family", value: "Family" },
                 { label: "Friend", value: "Friend" },
                 { label: "VIP", value: "VIP" },
@@ -796,7 +815,7 @@ export default function GuestsPage() {
               <div>
                 <h4 className="text-base font-bold text-slate-900">Import Completed Successfully</h4>
                 <p className="text-xs text-slate-500 mt-1">
-                  Added <b>{importSuccessCount || 22}</b> invitees to your event. Reminder schedules and WhatsApp templates are ready for dispatch.
+                  Added <b>{importSuccessCount || 22}</b> invitees to your event. Reminder schedules and WhatsApp templates are ready for sending.
                 </p>
               </div>
 
