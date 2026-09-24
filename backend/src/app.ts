@@ -35,7 +35,9 @@ export function createApp(): Express {
     cors({
       origin: (origin, callback) => {
         // Non-browser clients (no Origin header) such as Meta webhooks are allowed; CORS only governs browsers.
-        if (!origin || corsOrigins.includes(origin)) return callback(null, true);
+        if (!origin || corsOrigins.includes(origin) || corsOrigins.includes("*")) return callback(null, true);
+        // Automatically allow Vercel production and preview domains
+        if (/^https:\/\/([a-zA-Z0-9-]+\.)*vercel\.app$/.test(origin)) return callback(null, true);
         callback(null, false);
       },
       credentials: true,
