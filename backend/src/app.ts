@@ -38,6 +38,8 @@ export function createApp(): Express {
         if (!origin || corsOrigins.includes(origin) || corsOrigins.includes("*")) return callback(null, true);
         // Automatically allow Vercel production and preview domains
         if (/^https:\/\/([a-zA-Z0-9-]+\.)*vercel\.app$/.test(origin)) return callback(null, true);
+        // Automatically allow Tirvona domains (e.g. https://event.tirvona.com)
+        if (/^https?:\/\/([a-zA-Z0-9-]+\.)*tirvona\.com$/.test(origin)) return callback(null, true);
         callback(null, false);
       },
       credentials: true,

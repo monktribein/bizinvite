@@ -51,6 +51,7 @@ const envSchema = z
       .transform((v) => v === "true"),
 
     CORS_ORIGIN: z.string().default("http://localhost:3000"),
+    FRONTEND_URL: optionalString,
 
     WHATSAPP_API_VERSION: z.string().default("v21.0"),
     WHATSAPP_ACCESS_TOKEN: optionalString,
@@ -104,6 +105,16 @@ function loadEnv(): Env {
 
 export const env: Env = loadEnv();
 
-export const corsOrigins = env.CORS_ORIGIN.split(",")
-  .map((o) => o.trim())
+const rawOrigins = [
+  env.CORS_ORIGIN,
+  env.FRONTEND_URL,
+  process.env.FRONTEND_URL,
+  "https://event.tirvona.com",
+]
+  .filter(Boolean)
+  .join(",");
+
+export const corsOrigins = rawOrigins
+  .split(",")
+  .map((o) => o.trim().replace(/\/$/, ""))
   .filter(Boolean);
