@@ -76,7 +76,7 @@ const envSchema = z
     if (env.JWT_ACCESS_SECRET === env.JWT_REFRESH_SECRET) {
       ctx.addIssue({ code: "custom", path: ["JWT_REFRESH_SECRET"], message: "Must differ from JWT_ACCESS_SECRET" });
     }
-    if (env.NODE_ENV === "production") {
+    if (env.NODE_ENV === "production" && process.env.REQUIRE_WHATSAPP === "true") {
       for (const key of [
         "WHATSAPP_ACCESS_TOKEN",
         "WHATSAPP_PHONE_NUMBER_ID",
@@ -84,7 +84,7 @@ const envSchema = z
         "WHATSAPP_WEBHOOK_VERIFY_TOKEN",
         "WHATSAPP_APP_SECRET",
       ] as const) {
-        if (!env[key]) ctx.addIssue({ code: "custom", path: [key], message: `${key} is required in production` });
+        if (!env[key]) ctx.addIssue({ code: "custom", path: [key], message: `${key} is required when REQUIRE_WHATSAPP=true` });
       }
     }
   });

@@ -16,10 +16,9 @@ export function isWhatsAppConfigured(): boolean {
 }
 
 /**
- * Outside production, an unconfigured WhatsApp integration falls back to a log-only
- * dry-run sender so the campaign/reminder pipeline can be exercised locally.
- * Production startup requires the WhatsApp variables (see env.ts).
+ * When WhatsApp credentials are not configured, falls back to a log-only
+ * dry-run sender so the campaign/reminder pipeline works smoothly.
  */
 export function isWhatsAppDryRun(): boolean {
-  return !isWhatsAppConfigured() && env.NODE_ENV !== "production";
+  return !isWhatsAppConfigured();
 }
