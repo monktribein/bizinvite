@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { EVENT_CATEGORIES, EVENT_STATUSES } from "../../common/constants/enums";
+import { EVENT_STATUSES } from "../../common/constants/enums";
 import { isoDateSchema, objectIdSchema } from "../../common/validators/common";
 import { embeddedSessionSchema } from "../sessions/schema";
 
@@ -39,7 +39,7 @@ const reminderConfigSchema = z
 
 const baseEventFields = {
   name: z.string().trim().min(1, "Event name is required").max(200),
-  category: z.enum(EVENT_CATEGORIES).default("other"),
+  category: z.string().trim().min(1).max(100).default("other"),
   status: z.enum(EVENT_STATUSES).default("draft"),
   description: z.string().max(5000).optional(),
   startDate: isoDateSchema,
@@ -80,7 +80,7 @@ export const createEventSchema = z
 export const updateEventSchema = z
   .object({
     ...baseEventFields,
-    category: z.enum(EVENT_CATEGORIES),
+    category: z.string().trim().min(1).max(100),
     status: z.enum(EVENT_STATUSES),
     hosts: baseEventFields.hosts.removeDefault(),
     contactPersons: baseEventFields.contactPersons.removeDefault(),
@@ -94,7 +94,7 @@ export const updateEventSchema = z
 export const listEventsQuerySchema = z.object({
   search: z.string().max(100).optional(),
   status: z.enum(EVENT_STATUSES).optional(),
-  category: z.enum(EVENT_CATEGORIES).optional(),
+  category: z.string().trim().max(100).optional(),
 });
 
 export type CreateEventInput = z.infer<typeof createEventSchema>;

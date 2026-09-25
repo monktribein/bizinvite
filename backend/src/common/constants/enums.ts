@@ -3,8 +3,27 @@
 export const EVENT_STATUSES = ["draft", "upcoming", "active", "completed", "cancelled"] as const;
 export type EventStatus = (typeof EVENT_STATUSES)[number];
 
-export const EVENT_CATEGORIES = ["wedding", "corporate", "conference", "social", "other"] as const;
-export type EventCategory = (typeof EVENT_CATEGORIES)[number];
+export const EVENT_CATEGORIES = [
+  "wedding",
+  "corporate",
+  "conference",
+  "social",
+  "birthday",
+  "anniversary",
+  "engagement",
+  "exhibition",
+  "cultural",
+  "concert",
+  "sports",
+  "launch",
+  "workshop",
+  "reunion",
+  "charity",
+  "babyshower",
+  "housewarming",
+  "other",
+] as const;
+export type EventCategory = (typeof EVENT_CATEGORIES)[number] | (string & {});
 
 export const GUEST_CATEGORIES = ["VIP", "VVIP", "Family", "Friend", "Corporate", "Vendor"] as const;
 export type GuestCategory = (typeof GUEST_CATEGORIES)[number];

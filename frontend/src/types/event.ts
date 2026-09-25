@@ -44,11 +44,32 @@ export interface EventCheckInConfig {
   activeGates: string[];
 }
 
+export type EventCategory =
+  | "wedding"
+  | "corporate"
+  | "conference"
+  | "social"
+  | "birthday"
+  | "anniversary"
+  | "engagement"
+  | "exhibition"
+  | "cultural"
+  | "concert"
+  | "sports"
+  | "launch"
+  | "workshop"
+  | "reunion"
+  | "charity"
+  | "babyshower"
+  | "housewarming"
+  | "other"
+  | (string & {});
+
 export interface Event {
   id: string;
   organizationId: string;
   name: string;
-  category: "wedding" | "corporate" | "conference" | "social" | "other";
+  category: EventCategory;
   status: EventStatus;
   description?: string;
   startDate: string;

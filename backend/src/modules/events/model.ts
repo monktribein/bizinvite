@@ -1,5 +1,5 @@
 import { HydratedDocument, InferSchemaType, model, Schema } from "mongoose";
-import { DEFAULT_REMINDER_MAX_ATTEMPTS, DEFAULT_TIMEZONE, EVENT_CATEGORIES, EVENT_STATUSES } from "../../common/constants/enums";
+import { DEFAULT_REMINDER_MAX_ATTEMPTS, DEFAULT_TIMEZONE, EVENT_STATUSES } from "../../common/constants/enums";
 import { baseSchemaOptions, tenantGuardPlugin } from "../../common/utils/model";
 
 const venueSnapshotSchema = new Schema(
@@ -17,7 +17,7 @@ const eventSchema = new Schema(
   {
     organizationId: { type: Schema.Types.ObjectId, ref: "Organization", required: true },
     name: { type: String, required: true, trim: true, maxlength: 200 },
-    category: { type: String, enum: EVENT_CATEGORIES, default: "other" },
+    category: { type: String, trim: true, maxlength: 100, default: "other" },
     status: { type: String, enum: EVENT_STATUSES, default: "draft" },
     description: { type: String, maxlength: 5000 },
     startDate: { type: Date, required: true },

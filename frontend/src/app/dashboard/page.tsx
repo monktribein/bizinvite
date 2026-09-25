@@ -12,6 +12,7 @@ import { useReports } from "@/hooks/useReports";
 import { Card, CardHeader, CardContent } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { ContentLoader } from "@/components/ui/Loader";
 import { formatDate, formatNumber } from "@/lib/utils/formatters";
 import { CAMPAIGN_STATUS_CONFIG } from "@/config/constants";
 import {
@@ -35,7 +36,7 @@ import {
 
 export default function DashboardOverviewPage() {
   const { currentEventId } = useAuth();
-  const { events, refetch: refetchEvents } = useEvents();
+  const { events, isLoading: isLoadingEvents, refetch: refetchEvents } = useEvents();
   const { summary: rsvpSummary } = useRSVP(currentEventId);
   const { campaigns } = useCampaigns(currentEventId);
   const { rules: reminderRules } = useReminders(currentEventId);
@@ -71,6 +72,14 @@ export default function DashboardOverviewPage() {
   const declinedPct = totalInvited > 0 ? (declinedCount / totalInvited) * 100 : 0;
   const maybePct = totalInvited > 0 ? (maybeCount / totalInvited) * 100 : 0;
   const noResponsePct = totalInvited > 0 ? (noResponseCount / totalInvited) * 100 : 0;
+
+  if (isLoadingEvents) {
+    return (
+      <DashboardShell>
+        <ContentLoader label="Loading dashboard..." />
+      </DashboardShell>
+    );
+  }
 
   return (
     <DashboardShell>

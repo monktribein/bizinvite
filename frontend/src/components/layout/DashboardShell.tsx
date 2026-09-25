@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth/context";
 import { Sidebar } from "./Sidebar";
 import { Header } from "./Header";
+import { PageLoader } from "@/components/ui/Loader";
 
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -19,7 +20,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   }, [isAuthenticated, isLoading, router]);
 
   if (isLoading || !isAuthenticated) {
-    return <div className="flex min-h-screen items-center justify-center bg-slate-50 text-sm text-slate-500">Loading...</div>;
+    return <PageLoader label="Loading BizInvite..." />;
   }
 
   return (

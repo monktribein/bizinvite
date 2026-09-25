@@ -1,10 +1,11 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { Suspense, useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthProvider } from "@/lib/auth/context";
 
 import { ApiError } from "@/lib/api/client";
+import { GlobalLoader } from "@/components/ui/Loader";
 
 export function AppProviders({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(
@@ -27,6 +28,9 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
 
   return (
     <QueryClientProvider client={queryClient}>
+      <Suspense fallback={null}>
+        <GlobalLoader />
+      </Suspense>
       <AuthProvider>{children}</AuthProvider>
     </QueryClientProvider>
   );
