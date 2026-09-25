@@ -1,6 +1,7 @@
 import QRCode from "qrcode";
 import { Errors } from "../../common/errors/app-error";
 import type { ActorContext } from "../../common/utils/context";
+import { systemActor } from "../../common/utils/context";
 import { randomCode, randomToken } from "../../common/utils/crypto";
 import { isDuplicateKeyError } from "../../common/utils/model";
 import { searchRegex } from "../../common/utils/text";
@@ -12,12 +13,13 @@ import { sendTemplateToGuest } from "../conversations/messaging.service";
 import { WhatsAppSendError } from "../conversations/whatsapp.client";
 import { Event, EventDoc } from "../events/model";
 import { findEventOrThrow } from "../events/service";
+import { applyPermanentSendFailure } from "../guests/consent.service";
 import { communicationBlockReason } from "../guests/service";
 import { EventGuest, EventGuestDoc, Guest } from "../guests/model";
 import { Organization } from "../organizations/model";
 import { buildVariableContext } from "../templates/context";
 import { Template } from "../templates/model";
-import { assertTemplateSendable } from "../templates/service";
+import { assertTemplateSendable, templateSendProblem } from "../templates/service";
 import { Pass, PassDoc } from "./model";
 import { hashPassToken, PASS_CODE_PATTERN, signPassToken, verifyPassToken } from "./token";
 
@@ -234,7 +236,7 @@ export async function sendPass(data: { organizationId: string; passId: string })
   const block = communicationBlockReason(contact);
   if (block) return { skipped: block };
   const template = await Template.findOne({ _id: event.communication?.passTemplateId, organizationId: data.organizationId });
-  if (!template || template.approvalStatus !== "APPROVED") return { skipped: "template_not_approved" };
+  if (!template || templateSendProblem(template)) return { skipped: "template_not_approved" };
 
   const token = passToken(pass);
   try {
@@ -256,6 +258,7 @@ export async function sendPass(data: { organizationId: string; passId: string })
   } catch (err) {
     if (err instanceof WhatsAppSendError && err.permanent) {
       await Pass.updateOne({ _id: pass._id, organizationId: data.organizationId }, { $set: { deliveryStatus: "failed" } });
+      await applyPermanentSendFailure(systemActor(data.organizationId, "pass-delivery"), contact!, err.code);
       return { failed: err.message };
     }
     throw err;

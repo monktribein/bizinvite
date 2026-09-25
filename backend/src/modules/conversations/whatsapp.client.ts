@@ -16,6 +16,8 @@ const PERMANENT_ERROR_CODES = new Set([
   131021, // recipient cannot be sender
   131026, // message undeliverable (number not on WhatsApp / cannot receive)
   131047, // re-engagement required (outside 24h window for free-form)
+  131049, // Meta withheld the message to protect this user's engagement (per-user marketing limit)
+  131050, // user stopped receiving marketing messages from this business
   131051, // unsupported message type
   132000, // template param count mismatch
   132001, // template does not exist
@@ -29,11 +31,31 @@ const PERMANENT_ERROR_CODES = new Set([
 /** Codes meaning the phone number itself cannot receive WhatsApp messages. */
 export const INVALID_RECIPIENT_CODES = new Set([131026, 131021]);
 
+/** Codes meaning the recipient has told WhatsApp to stop messages from this business: treated as an opt-out. */
+export const OPT_OUT_ERROR_CODES = new Set([131050]);
+
+/**
+ * Errors about the sending account, not the recipient: every further send fails the same way
+ * until someone fixes the configuration, so a campaign is paused instead of failing each guest.
+ */
+export const ACCOUNT_ERROR_CODES = new Set([
+  3, // app lacks the capability
+  10, // permission denied
+  190, // access token invalid or expired
+  200, // permission error
+  368, // temporarily blocked for policy violations
+  131031, // business account locked
+  131042, // business eligibility / payment issue
+  133010, // phone number not registered on the Cloud API
+]);
+
 export class WhatsAppSendError extends Error {
   constructor(
     message: string,
     public readonly code: number | undefined,
-    public readonly permanent: boolean
+    public readonly permanent: boolean,
+    /** The sending account is misconfigured or blocked (see ACCOUNT_ERROR_CODES). */
+    public readonly accountLevel = false
   ) {
     super(message);
     this.name = "WhatsAppSendError";
@@ -70,8 +92,10 @@ async function graphRequest<T>(path: string, init: RequestInit = {}, timeoutMs =
     if (!response.ok) {
       const code = body.error?.code;
       const message = body.error?.error_data?.details ?? body.error?.message ?? `Graph API HTTP ${response.status}`;
-      const permanent = code !== undefined ? PERMANENT_ERROR_CODES.has(code) : response.status >= 400 && response.status < 500 && response.status !== 429;
-      throw new WhatsAppSendError(message, code, permanent);
+      const accountLevel = code !== undefined ? ACCOUNT_ERROR_CODES.has(code) : response.status === 401 || response.status === 403;
+      const permanent =
+        !accountLevel && (code !== undefined ? PERMANENT_ERROR_CODES.has(code) : response.status >= 400 && response.status < 500 && response.status !== 429);
+      throw new WhatsAppSendError(code !== undefined ? `${message} (WhatsApp error ${code})` : message, code, permanent, accountLevel);
     }
     return body;
   } catch (err) {
@@ -95,7 +119,7 @@ export async function sendTemplateMessage(input: {
     return { waMessageId, dryRun: true };
   }
   const phoneNumberId = input.phoneNumberId ?? whatsappConfig.phoneNumberId;
-  if (!phoneNumberId) throw new WhatsAppSendError("No WhatsApp phone number id configured", undefined, true);
+  if (!phoneNumberId) throw new WhatsAppSendError("No WhatsApp sender phone number id is configured", undefined, false, true);
 
   const body = await graphRequest<{ messages?: Array<{ id: string }> }>(`${phoneNumberId}/messages`, {
     method: "POST",
@@ -120,7 +144,7 @@ export async function uploadMedia(input: { phoneNumberId?: string; buffer: Buffe
     return mediaId;
   }
   const phoneNumberId = input.phoneNumberId ?? whatsappConfig.phoneNumberId;
-  if (!phoneNumberId) throw new WhatsAppSendError("No WhatsApp phone number id configured", undefined, true);
+  if (!phoneNumberId) throw new WhatsAppSendError("No WhatsApp sender phone number id is configured", undefined, false, true);
 
   const form = new FormData();
   form.append("messaging_product", "whatsapp");
@@ -143,6 +167,55 @@ export interface RemoteTemplate {
     text?: string;
     buttons?: Array<{ type: string; text: string; url?: string; phone_number?: string }>;
   }>;
+}
+
+export interface RemotePhoneNumber {
+  id: string;
+  display_phone_number?: string;
+  verified_name?: string;
+  quality_rating?: string;
+}
+
+/** Phone numbers registered to a WhatsApp Business Account. */
+export async function fetchPhoneNumbers(wabaId: string): Promise<RemotePhoneNumber[]> {
+  const body = await graphRequest<{ data?: RemotePhoneNumber[] }>(
+    `${encodeURIComponent(wabaId)}/phone_numbers?fields=id,display_phone_number,verified_name,quality_rating&limit=100`
+  );
+  return body.data ?? [];
+}
+
+export interface RemotePhoneNumberDetails extends RemotePhoneNumber {
+  /** CLOUD_API when the number can send through the Cloud API. */
+  platform_type?: string;
+  code_verification_status?: string;
+}
+
+/** One sender number's registration details; also proves the access token can use it. */
+export async function fetchPhoneNumber(phoneNumberId: string): Promise<RemotePhoneNumberDetails> {
+  return graphRequest<RemotePhoneNumberDetails>(
+    `${encodeURIComponent(phoneNumberId)}?fields=id,display_phone_number,verified_name,quality_rating,platform_type,code_verification_status`,
+    {},
+    8000
+  );
+}
+
+/**
+ * Apps subscribed to a WABA's webhooks. Meta only delivers message and status webhooks for a
+ * WABA whose subscribed apps include this app, even when the app's webhook URL is configured.
+ */
+export async function fetchSubscribedApps(wabaId: string): Promise<Array<{ id?: string; name?: string }>> {
+  const body = await graphRequest<{ data?: Array<{ whatsapp_business_api_data?: { id?: string; name?: string } }> }>(
+    `${encodeURIComponent(wabaId)}/subscribed_apps`,
+    {},
+    8000
+  );
+  return (body.data ?? []).map((d) => ({ id: d.whatsapp_business_api_data?.id, name: d.whatsapp_business_api_data?.name }));
+}
+
+/** Subscribes this app (the one the access token belongs to) to the WABA's webhooks. */
+export async function subscribeAppToWaba(wabaId: string): Promise<boolean> {
+  const body = await graphRequest<{ success?: boolean }>(`${encodeURIComponent(wabaId)}/subscribed_apps`, { method: "POST" });
+  return body.success === true;
 }
 
 export async function fetchMessageTemplates(wabaId: string): Promise<RemoteTemplate[]> {

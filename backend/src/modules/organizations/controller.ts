@@ -33,6 +33,14 @@ export async function update(req: Request, res: Response) {
   sendSuccess(req, res, await orgService.updateOrganization(actorFromRequest(req), body));
 }
 
+export async function whatsAppStatus(req: Request, res: Response) {
+  sendSuccess(req, res, await orgService.getWhatsAppStatus(req.tenant!.organizationId));
+}
+
+export async function subscribeWhatsAppWebhooks(req: Request, res: Response) {
+  sendSuccess(req, res, await orgService.subscribeWhatsAppWebhooks(actorFromRequest(req)), { message: "Webhooks subscribed" });
+}
+
 export async function team(req: Request, res: Response) {
   sendSuccess(req, res, await listTeam(req.tenant!.organizationId));
 }

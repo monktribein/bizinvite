@@ -1,8 +1,16 @@
 import { User, Role } from "@/types/auth";
-import { Organization, TeamMember } from "@/types/organization";
+import { Organization, TeamMember, WhatsAppConnectionStatus } from "@/types/organization";
 import { Event } from "@/types/event";
 import { Guest, RSVPStatus, ImportPreviewResult } from "@/types/guest";
-import { Campaign, WhatsAppTemplate } from "@/types/campaign";
+import {
+  AudiencePreview,
+  Campaign,
+  CampaignRecipient,
+  CampaignRecipientPage,
+  CampaignTargetSegment,
+  RecipientStatus,
+  WhatsAppTemplate,
+} from "@/types/campaign";
 import { ReminderRule } from "@/types/reminder";
 import { RSVPRecord, RSVPSummary } from "@/types/rsvp";
 import { DigitalPass } from "@/types/pass";
@@ -579,26 +587,43 @@ class MockAdapter {
     return this.campaigns;
   }
 
-  async createCampaign(campaignData: Partial<Campaign>): Promise<Campaign> {
+  /** Mirrors the backend audience rules: segment filters, optional explicit selection, no cancelled invitations. */
+  private audienceFor(eventId: string, segment: CampaignTargetSegment = {}): Guest[] {
+    const selected = segment.eventGuestIds?.length ? new Set(segment.eventGuestIds) : null;
+    return this.guests.filter(
+      (g) =>
+        g.eventId === eventId &&
+        (!selected || selected.has(g.id)) &&
+        (!segment.category || g.category === segment.category) &&
+        (!segment.onlyVip || g.isVip) &&
+        (!segment.rsvpStatus || g.rsvpStatus === segment.rsvpStatus)
+    );
+  }
+
+  async createCampaign(campaignData: Partial<Campaign> & { draft?: boolean }): Promise<Campaign> {
     await delay(300);
     const tmpl = this.templates.find((t) => t.id === campaignData.templateId);
     if (tmpl && tmpl.approvalStatus !== "APPROVED") {
       throw new Error("Cannot send an unapproved WhatsApp template.");
     }
+    const eventId = campaignData.eventId || this.events[0]?.id || "";
+    const segment = campaignData.targetSegment || {};
 
     const newCampaign: Campaign = {
       id: `cmp_${Date.now()}`,
       organizationId: MOCK_ORGANIZATION.id,
-      eventId: campaignData.eventId || this.events[0]?.id || "",
+      eventId,
       eventName: this.events.find((e) => e.id === campaignData.eventId)?.name || "Event",
       name: campaignData.name || "New Campaign",
       templateId: campaignData.templateId || this.templates[0].id,
       templateName: tmpl?.name || "Template",
-      status: campaignData.scheduledFor ? "scheduled" : "running",
-      targetSegment: campaignData.targetSegment || {},
+      status: campaignData.draft ? "draft" : campaignData.scheduledFor ? "scheduled" : "running",
+      targetSegment: { ...segment, selectedGuestCount: segment.eventGuestIds?.length ?? 0 },
       scheduledFor: campaignData.scheduledFor,
+      // No dispatch job in mock mode: the recipient list counts as built immediately.
+      recipientsBuiltAt: new Date().toISOString(),
       metrics: {
-        totalTargeted: this.guests.filter((g) => g.eventId === campaignData.eventId).length || 0,
+        totalTargeted: this.audienceFor(eventId, segment).length,
         sent: 0,
         delivered: 0,
         read: 0,
@@ -625,6 +650,79 @@ class MockAdapter {
     if (!c) throw new Error("Campaign not found");
     c.status = "running";
     return c;
+  }
+
+  async sendCampaign(id: string): Promise<Campaign> {
+    await delay(150);
+    const c = this.campaigns.find((item) => item.id === id);
+    if (!c) throw new Error("Campaign not found");
+    if (c.status !== "draft" && c.status !== "scheduled") throw new Error(`A ${c.status} campaign cannot be sent`);
+    c.status = "running";
+    c.scheduledFor = undefined;
+    c.startedAt = new Date().toISOString();
+    c.recipientsBuiltAt = c.startedAt;
+    return c;
+  }
+
+  async cancelCampaign(id: string): Promise<Campaign> {
+    await delay(150);
+    const c = this.campaigns.find((item) => item.id === id);
+    if (!c) throw new Error("Campaign not found");
+    if (!["draft", "scheduled", "running", "paused"].includes(c.status)) throw new Error("This campaign can no longer be cancelled");
+    c.status = "cancelled";
+    return c;
+  }
+
+  /** Mock mode sends nothing, so every targeted guest is listed as pending (or suppressed when blocked). */
+  async getCampaignRecipients(id: string, status?: RecipientStatus): Promise<CampaignRecipientPage> {
+    await delay(100);
+    const c = this.campaigns.find((item) => item.id === id);
+    if (!c) throw new Error("Campaign not found");
+    const items: CampaignRecipient[] = this.audienceFor(c.eventId, c.targetSegment).map((g) => {
+      const reason = g.optedOut ? "opted_out" : g.communicationSuppressed ? "suppressed" : g.mobileValid === false ? "invalid_mobile" : undefined;
+      return {
+        id: `rcp_${g.id}`,
+        campaignId: c.id,
+        guestId: g.id,
+        guestName: g.name,
+        mobile: g.mobile,
+        status: reason ? "suppressed" : c.status === "cancelled" ? "suppressed" : "pending",
+        suppressionReason: reason ?? (c.status === "cancelled" ? "campaign_cancelled" : undefined),
+      };
+    });
+    const filtered = status ? items.filter((r) => r.status === status) : items;
+    return { items: filtered, total: filtered.length };
+  }
+
+  async previewAudience(eventId: string, segment: CampaignTargetSegment): Promise<AudiencePreview> {
+    await delay(80);
+    const matched = this.audienceFor(eventId, segment);
+    const suppressed: AudiencePreview["suppressed"] = {};
+    for (const g of matched) {
+      const reason = g.optedOut ? "opted_out" : g.communicationSuppressed ? "suppressed" : g.mobileValid === false ? "invalid_mobile" : null;
+      if (reason) suppressed[reason] = (suppressed[reason] ?? 0) + 1;
+    }
+    const blocked = Object.values(suppressed).reduce((a, b) => a + (b ?? 0), 0);
+    return {
+      matched: matched.length,
+      eligible: matched.length - blocked,
+      suppressed,
+      selectedNotMatched: segment.eventGuestIds ? segment.eventGuestIds.length - matched.length : 0,
+    };
+  }
+
+  /** Mock mode never delivers messages. */
+  async getWhatsAppStatus(): Promise<WhatsAppConnectionStatus> {
+    await delay(50);
+    return {
+      mode: "dry_run",
+      dryRun: true,
+      sender: { source: "none", dedicatedNumber: false, qualityRating: "UNKNOWN" },
+      webhook: { verifyTokenConfigured: false, signatureVerification: false },
+      templates: { approved: this.templates.filter((t) => t.approvalStatus === "APPROVED").length, total: this.templates.length },
+      ready: false,
+      warnings: ["Mock API mode: nothing is sent to WhatsApp."],
+    };
   }
 
   // RSVPs

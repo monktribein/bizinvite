@@ -10,9 +10,9 @@ import { AuditLog, ConsentRecord } from "@/types/audit";
 import { Card, CardHeader, CardContent } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
-import { Select } from "@/components/ui/Select";
 import { Modal } from "@/components/ui/Modal";
 import { Badge } from "@/components/ui/Badge";
+import { WhatsAppConnectionCard } from "@/components/settings/WhatsAppConnectionCard";
 import { Role } from "@/types/auth";
 import {
   Table,
@@ -437,57 +437,7 @@ export default function SettingsPage() {
       )}
 
       {/* TAB 3: WHATSAPP INTEGRATION STATUS */}
-      {activeTab === "whatsapp" && (
-        <Card className="max-w-3xl">
-          <CardHeader
-            title="WhatsApp Business API (WABA) Connection"
-            subtitle="Enterprise Cloud API connection health & quality rating"
-          />
-          <CardContent className="space-y-4 text-xs">
-            <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-4 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="h-10 w-10 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold">
-                  <CheckCircle2 className="w-6 h-6" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-slate-900">WhatsApp Gateway Connected</span>
-                    <Badge variant="success" size="sm">
-                      HEALTHY
-                    </Badge>
-                  </div>
-                  <p className="text-slate-500 text-[11px] mt-0.5 font-mono">
-                    Sender: {organization?.whatsAppStatus?.phoneNumber || "+91 98200 12345"}
-                  </p>
-                </div>
-              </div>
-
-              <div className="text-right">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 block">
-                  Quality Tier
-                </span>
-                <span className="font-bold text-slate-900">
-                  {organization?.whatsAppStatus?.tier || "TIER_100K"} ({organization?.whatsAppStatus?.qualityRating || "GREEN"})
-                </span>
-              </div>
-            </div>
-
-            <div className="space-y-3 pt-2">
-              <Input
-                label="WhatsApp Business Account ID (WABA ID)"
-                defaultValue={organization?.whatsAppStatus?.wabaId || "waba_biz_998127391"}
-                readOnly
-                className="font-mono text-slate-600"
-              />
-              <Input
-                label="Verified Display Name"
-                defaultValue={organization?.whatsAppStatus?.businessDisplayName || "Aura Events Concierge"}
-                readOnly
-              />
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      {activeTab === "whatsapp" && <WhatsAppConnectionCard />}
 
       {/* TAB 4: CONSENT & OPT-OUTS */}
       {activeTab === "consent" && (
@@ -802,7 +752,7 @@ export default function SettingsPage() {
               className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-600"
             />
             <p className="text-[11px] text-slate-500">
-              Admin can update or reset this user's password directly.
+              Admin can update or reset this user&apos;s password directly.
             </p>
           </div>
 

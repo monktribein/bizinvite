@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { NAVIGATION_ITEMS } from "@/config/navigation";
 import { useAuth } from "@/lib/auth/context";
 import { cn } from "@/lib/utils/cn";
+import { WhatsAppIndicator } from "./WhatsAppIndicator";
 import { Sparkles, X } from "lucide-react";
 
 interface SidebarProps {
@@ -105,11 +106,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
 
         {/* System Health / Footer */}
         <div className="border-t border-slate-200 p-4 bg-slate-50/50">
-          <div className="flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="text-xs font-medium text-slate-600">WhatsApp Gateway Live</span>
-          </div>
-          <p className="text-[11px] text-slate-400 mt-0.5">M10 Cluster Isolated Tenant</p>
+          <WhatsAppIndicator variant="footer" />
         </div>
       </aside>
     </>

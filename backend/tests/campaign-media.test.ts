@@ -96,8 +96,10 @@ describe("campaign media", () => {
     expect(await Campaign.countDocuments({ organizationId: t.org.id })).toBe(0);
     expect(await Message.countDocuments({ organizationId: t.org.id, purpose: "test" })).toBe(1);
 
+    // Meta rejects an IMAGE-header template sent without an image, so it is refused before sending.
     const noMedia = await t.api.post("/api/v1/campaigns/test", { eventId: event.id, templateId: tpl.id, mobile: "+91 98200 12345" });
-    expect(noMedia.status).toBe(200);
+    expect(noMedia.status).toBe(422);
+    expect(noMedia.body.error.fields.mediaId).toBeDefined();
 
     const badMobile = await t.api.post("/api/v1/campaigns/test", { eventId: event.id, templateId: tpl.id, mobile: "12345678" });
     expect(badMobile.status).toBe(422);

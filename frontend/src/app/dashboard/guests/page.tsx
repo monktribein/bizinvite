@@ -1,9 +1,11 @@
 "use client";
 
 import React, { useState } from "react";
+import { useRouter } from "next/navigation";
 import { DashboardShell } from "@/components/layout/DashboardShell";
 import { useGuests } from "@/hooks/useGuests";
 import { useAuth } from "@/lib/auth/context";
+import { setCampaignSelection } from "@/lib/campaign-selection";
 import { Guest, ImportPreviewResult } from "@/types/guest";
 import { guestService } from "@/services/guest.service";
 import { ApiError } from "@/lib/api/client";
@@ -36,10 +38,39 @@ import {
   CheckCircle,
   AlertTriangle,
   XCircle,
+  Send,
 } from "lucide-react";
+
+const NO_SELECTION: ReadonlySet<string> = new Set();
+
+/** Why the server will not message this guest, if anything. */
+function communicationBlock(g: Guest): string | null {
+  if (g.optedOut) return "Opted out";
+  if (g.communicationSuppressed) return "Suppressed";
+  if (g.mobileValid === false) return "Invalid number";
+  return null;
+}
 
 export default function GuestsPage() {
   const { currentEventId, can } = useAuth();
+  const router = useRouter();
+  const canInvite = can("campaigns:create");
+
+  // Guests selected for an invitation campaign. Kept per event, so switching events starts empty.
+  const [selection, setSelection] = useState<{ eventId: string; ids: ReadonlySet<string> }>({ eventId: "", ids: NO_SELECTION });
+  const selectedIds = selection.eventId === currentEventId ? selection.ids : NO_SELECTION;
+  const updateSelection = (update: (ids: Set<string>) => void) => {
+    const next = new Set(selectedIds);
+    update(next);
+    setSelection({ eventId: currentEventId, ids: next });
+  };
+  const clearSelection = () => setSelection({ eventId: currentEventId, ids: NO_SELECTION });
+
+  const sendToSelected = () => {
+    if (!currentEventId || selectedIds.size === 0) return;
+    setCampaignSelection({ eventId: currentEventId, eventGuestIds: [...selectedIds], openComposer: true });
+    router.push("/dashboard/campaigns");
+  };
 
   // Search & Filter state
   const [searchQuery, setSearchQuery] = useState("");
@@ -64,6 +95,9 @@ export default function GuestsPage() {
   const pageSize = 10;
   const totalPages = Math.ceil(guests.length / pageSize) || 1;
   const paginatedGuests = guests.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const pageAllSelected = paginatedGuests.length > 0 && paginatedGuests.every((g) => selectedIds.has(g.id));
+  const allMatchingSelected = guests.length > 0 && guests.every((g) => selectedIds.has(g.id));
+  const blockedSelected = guests.filter((g) => selectedIds.has(g.id) && communicationBlock(g)).length;
 
   // Single Guest Add / Edit Modal
   const [isGuestModalOpen, setIsGuestModalOpen] = useState(false);
@@ -294,12 +328,59 @@ export default function GuestsPage() {
         </div>
       </div>
 
+      {/* Invitation selection bar */}
+      {canInvite && selectedIds.size > 0 && (
+        <div className="mb-3 flex flex-col gap-2 rounded-xl border border-indigo-200 bg-indigo-50/70 px-4 py-2.5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-indigo-900">
+            <span className="font-semibold">
+              {selectedIds.size} guest{selectedIds.size === 1 ? "" : "s"} selected
+            </span>
+            {!allMatchingSelected && guests.length > 0 && (
+              <button
+                type="button"
+                onClick={() => updateSelection((ids) => guests.forEach((g) => ids.add(g.id)))}
+                className="font-semibold text-indigo-700 underline cursor-pointer"
+              >
+                Select all {guests.length} matching guests
+              </button>
+            )}
+            <button type="button" onClick={clearSelection} className="text-indigo-700 underline cursor-pointer">
+              Clear selection
+            </button>
+            {blockedSelected > 0 && (
+              <span className="text-amber-800">
+                {blockedSelected} opted out, suppressed or with an invalid number will be skipped
+              </span>
+            )}
+          </div>
+          <Button size="sm" onClick={sendToSelected} className="text-xs shrink-0">
+            <Send className="w-3.5 h-3.5 mr-1" /> Send invitation to {selectedIds.size} selected
+          </Button>
+        </div>
+      )}
+
       {/* Guest Table */}
       <Card>
         <CardContent className="p-0">
           <Table>
             <TableHeader>
               <TableRow>
+                {canInvite && (
+                  <TableHead className="w-8">
+                    <input
+                      type="checkbox"
+                      aria-label="Select all guests on this page"
+                      checked={pageAllSelected}
+                      disabled={paginatedGuests.length === 0}
+                      onChange={(e) =>
+                        updateSelection((ids) =>
+                          paginatedGuests.forEach((g) => (e.target.checked ? ids.add(g.id) : ids.delete(g.id)))
+                        )
+                      }
+                      className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                    />
+                  </TableHead>
+                )}
                 <TableHead>Guest Name & Family</TableHead>
                 <TableHead>Contact (WhatsApp)</TableHead>
                 <TableHead>Category / VIP</TableHead>
@@ -313,19 +394,31 @@ export default function GuestsPage() {
             <TableBody>
               {isLoading ? (
                 <tr>
-                  <td colSpan={8} className="text-center py-12 text-slate-400">
+                  <td colSpan={canInvite ? 9 : 8} className="text-center py-12 text-slate-400">
                     Loading guest directory...
                   </td>
                 </tr>
               ) : paginatedGuests.length === 0 ? (
-                <TableEmptyState message="No guests found for current filters" colSpan={8} />
+                <TableEmptyState message="No guests found for current filters" colSpan={canInvite ? 9 : 8} />
               ) : (
                 paginatedGuests.map((g) => {
                   const rsvpCfg = RSVP_STATUS_CONFIG[g.rsvpStatus] || RSVP_STATUS_CONFIG.no_response;
                   const checkInCfg = CHECKIN_STATUS_CONFIG[g.checkInStatus] || CHECKIN_STATUS_CONFIG.not_checked_in;
+                  const block = communicationBlock(g);
 
                   return (
-                    <TableRow key={g.id}>
+                    <TableRow key={g.id} className={selectedIds.has(g.id) ? "bg-indigo-50/40" : undefined}>
+                      {canInvite && (
+                        <TableCell className="w-8">
+                          <input
+                            type="checkbox"
+                            aria-label={`Select ${g.name}`}
+                            checked={selectedIds.has(g.id)}
+                            onChange={(e) => updateSelection((ids) => (e.target.checked ? ids.add(g.id) : ids.delete(g.id)))}
+                            className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                          />
+                        </TableCell>
+                      )}
                       {/* Name & Family */}
                       <TableCell>
                         <div className="font-semibold text-slate-900 flex items-center gap-1.5">
@@ -345,6 +438,11 @@ export default function GuestsPage() {
                       <TableCell>
                         <div className="font-mono text-slate-800">{formatPhone(g.mobile)}</div>
                         <span className="text-[10px] text-slate-400">{g.email || "No email"}</span>
+                        {block && (
+                          <Badge variant="warning" size="sm" className="mt-0.5 block w-fit" title="WhatsApp messages are not sent to this guest">
+                            {block}
+                          </Badge>
+                        )}
                       </TableCell>
 
                       {/* Category & VIP */}

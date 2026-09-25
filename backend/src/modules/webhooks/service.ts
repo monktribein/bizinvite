@@ -9,8 +9,7 @@ import { ScheduledJob } from "../../scheduler/model";
 import { CampaignRecipient } from "../campaigns/model";
 import { touchConversation } from "../conversations/messaging.service";
 import { Message, MessageDoc } from "../conversations/model";
-import { INVALID_RECIPIENT_CODES } from "../conversations/whatsapp.client";
-import { markMobileInvalid, optInContact, optOutContact } from "../guests/consent.service";
+import { applyPermanentSendFailure, optInContact, optOutContact } from "../guests/consent.service";
 import { EventGuest, Guest } from "../guests/model";
 import { Organization } from "../organizations/model";
 import { Pass } from "../passes/model";
@@ -103,7 +102,6 @@ async function applyStatus(update: StatusUpdate): Promise<string> {
   }
 
   if (next === "failed") {
-    const permanent = error?.code !== undefined && INVALID_RECIPIENT_CODES.has(error.code);
     if (message.scheduledJobId) {
       await ScheduledJob.updateOne(
         { _id: message.scheduledJobId, organizationId, status: "completed" },
@@ -111,9 +109,9 @@ async function applyStatus(update: StatusUpdate): Promise<string> {
       );
       if (message.eventGuestId) await EventGuest.updateOne({ _id: message.eventGuestId, organizationId }, { $set: { reminderStatus: "failed" } });
     }
-    if (permanent && message.guestId) {
+    if (error?.code !== undefined && message.guestId) {
       const contact = await Guest.findOne({ _id: message.guestId, organizationId });
-      if (contact) await markMobileInvalid(systemActor(organizationId, "whatsapp-webhook"), contact, `WhatsApp error ${error?.code}`);
+      if (contact) await applyPermanentSendFailure(systemActor(organizationId, "whatsapp-webhook"), contact, error.code);
     }
   }
   return `status_${next}`;
@@ -212,6 +210,9 @@ async function applyInbound(msg: InboundMessage, phoneNumberId?: string): Promis
   return { outcome: "message_recorded", organizationId };
 }
 
+/** How long a status for an unknown message id is retried before it is ignored as foreign. */
+export const STATUS_RACE_WINDOW_MS = 10 * 60 * 1000;
+
 /** whatsapp.process-webhook job. Claims the event so two runs cannot both process it. */
 export async function processWebhookEvent(webhookEventId: string) {
   const event = await WebhookEvent.findOneAndUpdate(
@@ -227,6 +228,10 @@ export async function processWebhookEvent(webhookEventId: string) {
       outcome = await applyStatus(statusUpdateSchema.parse(event.payload));
     } else {
       ({ outcome, organizationId } = await applyInbound(inboundMessageSchema.parse(event.payload), event.phoneNumberId ?? undefined));
+    }
+    if (event.kind === "status" && outcome === "unknown_message" && Date.now() - (event.get("createdAt") as Date).getTime() < STATUS_RACE_WINDOW_MS) {
+      // Meta can report "sent" before the send call returned and the message id was stored: retry shortly.
+      throw new Error("Status for a message id not stored yet; will retry");
     }
     const ignored = ["unknown_message", "unknown_sender", "ignored_status"].includes(outcome);
     await WebhookEvent.updateOne(

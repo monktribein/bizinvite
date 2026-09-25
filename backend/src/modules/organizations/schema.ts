@@ -27,9 +27,13 @@ export const updateOrganizationSchema = z
     defaultCountryCode: z.string().regex(/^\d{1,4}$/).optional(),
     whatsApp: z
       .object({
-        phoneNumberId: z.string().max(64).optional(),
+        /** null returns the organization to the platform default sender. */
+        phoneNumberId: z.string().trim().regex(/^\d{5,32}$/, "Must be a numeric WhatsApp phone number id").nullable().optional(),
+        /** Platform admins only. */
         phoneNumber: z.string().max(32).optional(),
-        wabaId: z.string().max(64).optional(),
+        /** Platform admins only; null disconnects the organization's own WABA. */
+        wabaId: z.string().trim().regex(/^\d{5,32}$/, "Must be a numeric WhatsApp Business Account id").nullable().optional(),
+        /** Platform admins only. */
         businessDisplayName: z.string().max(120).optional(),
       })
       .optional(),

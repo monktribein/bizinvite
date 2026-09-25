@@ -6,13 +6,13 @@
  *   npm run worker
  */
 import { connectDatabase, disconnectDatabase } from "./config/database";
-import { isWhatsAppDryRun } from "./config/whatsapp";
+import { whatsappStartupWarnings } from "./config/whatsapp";
 import { logger } from "./common/utils/logger";
 import { startScheduler, stopScheduler } from "./scheduler/scheduler";
 
 async function main() {
   await connectDatabase();
-  if (isWhatsAppDryRun()) logger.warn("WhatsApp is not configured: messages are logged, not sent (dry-run)");
+  for (const warning of whatsappStartupWarnings()) logger.warn(warning);
   await startScheduler();
 
   const shutdown = async (signal: string) => {

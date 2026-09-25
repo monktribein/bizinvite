@@ -16,6 +16,7 @@ export const campaignsRouter = Router();
 campaignsRouter.get("/", requirePermission("campaigns:view"), controller.list);
 campaignsRouter.post("/", requirePermission("campaigns:create"), controller.create);
 campaignsRouter.post("/test", requirePermission("campaigns:send"), controller.testDraft);
+campaignsRouter.post("/audience-preview", requirePermission("campaigns:create"), controller.audiencePreview);
 campaignsRouter.post("/media", requirePermission("campaigns:create"), mediaUpload.single("file"), controller.uploadMedia);
 campaignsRouter.get("/media/:mediaId", requirePermission("campaigns:view"), controller.getMediaFile);
 campaignsRouter.get("/:id", requirePermission("campaigns:view"), controller.get);

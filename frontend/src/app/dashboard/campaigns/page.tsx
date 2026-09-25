@@ -1,8 +1,10 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { DashboardShell } from "@/components/layout/DashboardShell";
-import { useCampaigns } from "@/hooks/useCampaigns";
+import { useAudiencePreview, useCampaigns } from "@/hooks/useCampaigns";
+import { useGuests } from "@/hooks/useGuests";
+import { GuestPicker } from "@/components/campaigns/GuestPicker";
 import { useAuth } from "@/lib/auth/context";
 import { campaignService } from "@/services/campaign.service";
 import { Card, CardHeader, CardContent } from "@/components/ui/Card";
@@ -11,10 +13,20 @@ import { Input } from "@/components/ui/Input";
 import { Badge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
 import { CreateTemplateModal } from "@/components/campaigns/CreateTemplateModal";
+import { CampaignRecipientsModal } from "@/components/campaigns/CampaignRecipientsModal";
+import { WhatsAppStatusBanner } from "@/components/campaigns/WhatsAppStatusBanner";
 import { CAMPAIGN_STATUS_CONFIG } from "@/config/constants";
 import { formatDate } from "@/lib/utils/formatters";
 import { ApiError } from "@/lib/api/client";
-import { CAMPAIGN_MEDIA_LIMITS, CampaignMedia, CampaignMediaType } from "@/types/campaign";
+import {
+  CampaignGuestSelection,
+  clearCampaignSelection,
+  getCampaignSelection,
+  getComposeRequest,
+  markComposerOpened,
+} from "@/lib/campaign-selection";
+import { CAMPAIGN_MEDIA_LIMITS, Campaign, CampaignMedia, CampaignMediaType, CampaignTargetSegment, WhatsAppTemplate } from "@/types/campaign";
+import { TemplateMappingModal } from "@/components/campaigns/TemplateMappingModal";
 import {
   Send,
   Plus,
@@ -27,7 +39,45 @@ import {
   Upload,
   X,
   RefreshCw,
+  Users,
+  Ban,
+  FileText,
+  ListChecks,
 } from "lucide-react";
+
+type AudienceMode = "segment" | "selected";
+
+/** Segment dropdown values: "all", "uninvited", or a guest category. */
+const SEGMENT_OPTIONS = [
+  { value: "VVIP", label: "VVIP guests only" },
+  { value: "VIP", label: "VIP tier" },
+  { value: "Family", label: "Family circle" },
+  { value: "Friend", label: "Friends" },
+  { value: "Corporate", label: "Corporate & partners" },
+];
+
+const SUPPRESSION_LABELS: Record<string, string> = {
+  opted_out: "opted out",
+  suppressed: "suppressed",
+  invalid_mobile: "invalid number",
+  contact_missing: "removed",
+};
+
+/** A selection handed over from the Guests page ("Send invitation to N selected"). */
+function readComposeHandoff(): CampaignGuestSelection | null {
+  return typeof window === "undefined" ? null : getComposeRequest();
+}
+
+function describeSegment(segment: CampaignTargetSegment): string {
+  const parts: string[] = [];
+  const selected = segment.selectedGuestCount ?? segment.eventGuestIds?.length ?? 0;
+  if (selected > 0) parts.push(`${selected} selected guest${selected === 1 ? "" : "s"}`);
+  if (segment.category) parts.push(segment.category);
+  if (segment.onlyVip) parts.push("VIP only");
+  if (segment.rsvpStatus) parts.push(`RSVP: ${segment.rsvpStatus}`);
+  if (segment.onlyUninvited) parts.push("not yet invited");
+  return parts.length ? parts.join(" • ") : "All guests";
+}
 
 const MEDIA_ACCEPT = [...CAMPAIGN_MEDIA_LIMITS.image.mimeTypes, ...CAMPAIGN_MEDIA_LIMITS.video.mimeTypes].join(",");
 
@@ -51,23 +101,84 @@ export default function CampaignsPage() {
     createTemplate,
     syncTemplates,
     isSyncingTemplates,
+    updateTemplateMapping,
     createCampaign,
     pauseCampaign,
     resumeCampaign,
+    sendCampaign,
+    cancelCampaign,
+    refetchCampaigns,
   } = useCampaigns(currentEventId);
 
   const [activeTab, setActiveTab] = useState<"campaigns" | "templates">("campaigns");
 
+  // Guests selected on the Guests page; the form opens in "Selected guests" mode for them.
+  const [initialHandoff] = useState(readComposeHandoff);
+  const [guestSelection, setGuestSelection] = useState<CampaignGuestSelection | null>(
+    () => initialHandoff ?? (typeof window === "undefined" ? null : getCampaignSelection())
+  );
+  const [audienceMode, setAudienceMode] = useState<AudienceMode>(initialHandoff ? "selected" : "segment");
+  useEffect(() => {
+    // Handled: a reload or a later visit must not reopen the form (the selection itself stays available).
+    if (initialHandoff) markComposerOpened();
+  }, [initialHandoff]);
+
   // New Campaign Launcher Modal State
-  const [isNewCampaignModalOpen, setIsNewCampaignModalOpen] = useState(false);
+  const [isNewCampaignModalOpen, setIsNewCampaignModalOpen] = useState(initialHandoff !== null);
   const [campaignName, setCampaignName] = useState("");
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
-  const [targetSegment, setTargetSegment] = useState<string>("all");
+  const [segmentChoice, setSegmentChoice] = useState<string>(initialHandoff ? "all" : "uninvited");
+
+  // Campaign list actions
+  const [recipientsCampaign, setRecipientsCampaign] = useState<Campaign | null>(null);
+  const [cancelTarget, setCancelTarget] = useState<Campaign | null>(null);
+  const [actionError, setActionError] = useState("");
+  const [busyCampaignId, setBusyCampaignId] = useState<string | null>(null);
+
+  const runCampaignAction = async (campaignId: string, action: () => Promise<unknown>, fallback: string) => {
+    setActionError("");
+    setBusyCampaignId(campaignId);
+    try {
+      await action();
+      return true;
+    } catch (err) {
+      setActionError(errorMessage(err, fallback));
+      return false;
+    } finally {
+      setBusyCampaignId(null);
+    }
+  };
+
+  // The event's guests for the form's picker. A selection made for another event is ignored.
+  const { guests: eventGuests, isLoading: isLoadingGuests } = useGuests(currentEventId);
+  const pickedIds = guestSelection && guestSelection.eventId === currentEventId ? guestSelection.eventGuestIds : [];
+  const setPickedIds = (ids: string[]) => setGuestSelection({ eventId: currentEventId, eventGuestIds: ids });
+  const usingSelection = audienceMode === "selected" && pickedIds.length > 0;
+
+  const buildTargetSegment = (): CampaignTargetSegment => {
+    const segment: CampaignTargetSegment = {};
+    if (segmentChoice === "uninvited") segment.onlyUninvited = true;
+    else if (segmentChoice !== "all") segment.category = segmentChoice;
+    if (usingSelection) segment.eventGuestIds = pickedIds;
+    return segment;
+  };
+  const targetSegment = buildTargetSegment();
+  const audienceBlocked = audienceMode === "selected" && pickedIds.length === 0;
+  const { data: audience, isFetching: isLoadingAudience } = useAudiencePreview(
+    currentEventId,
+    targetSegment,
+    isNewCampaignModalOpen && !audienceBlocked && can("campaigns:create")
+  );
+
+  const switchAudienceMode = (mode: AudienceMode) => {
+    setAudienceMode(mode);
+    // "Selected guests" starts with no extra filter; the segment flow defaults to uninvited guests.
+    setSegmentChoice(mode === "selected" ? "all" : "uninvited");
+  };
+
   const [scheduleChoice, setScheduleChoice] = useState<"now" | "later">("now");
   const [scheduledDateTime, setScheduledDateTime] = useState("2026-10-01T10:00");
-  const [testMobileNumber, setTestMobileNumber] = useState("+91 98200 12345");
-  const [testSentMessage, setTestSentMessage] = useState("");
-  const [isSendingTest, setIsSendingTest] = useState(false);
+  const [mappingTemplate, setMappingTemplate] = useState<WhatsAppTemplate | null>(null);
   const [launchError, setLaunchError] = useState("");
   const [isCreateTemplateOpen, setIsCreateTemplateOpen] = useState(false);
   const [templateSyncMessage, setTemplateSyncMessage] = useState("");
@@ -91,7 +202,6 @@ export default function CampaignsPage() {
     setActiveTab("templates");
     if (isWhatsAppDryRun) setIsCreateTemplateOpen(true);
   };
-  const [testError, setTestError] = useState("");
 
   // Optional invitation image/video, uploaded as soon as it is picked
   const [campaignMedia, setCampaignMedia] = useState<CampaignMedia | null>(null);
@@ -109,8 +219,6 @@ export default function CampaignsPage() {
     clearMedia();
     setMediaError("");
     setLaunchError("");
-    setTestError("");
-    setTestSentMessage("");
     setIsNewCampaignModalOpen(false);
   };
 
@@ -148,66 +256,76 @@ export default function CampaignsPage() {
     }
   };
 
-  const approvedTemplates = templates.filter((t) => t.approvalStatus === "APPROVED");
-  const selectedTemplate = templates.find((t) => t.id === selectedTemplateId) || approvedTemplates[0];
+  // Only templates Meta will accept: approved, fully mapped, and real (not local test templates) when live.
+  const isSendable = (t: WhatsAppTemplate) =>
+    t.approvalStatus === "APPROVED" && !t.mappingProblems?.length && !(t.source === "local" && !isWhatsAppDryRun);
+  const approvedTemplates = templates.filter(isSendable);
+  const unmappedApproved = templates.filter((t) => t.approvalStatus === "APPROVED" && !isSendable(t));
+  const selectedTemplate = approvedTemplates.find((t) => t.id === selectedTemplateId) || approvedTemplates[0];
 
   // WhatsApp only carries media as the template header, so the approved template must declare a matching one
   const templateMediaType: CampaignMediaType | null =
     selectedTemplate?.headerType === "IMAGE" ? "image" : selectedTemplate?.headerType === "VIDEO" ? "video" : null;
   const mediaTemplateMismatch =
     !!campaignMedia && selectedTemplate?.source !== "local" && campaignMedia.type !== templateMediaType;
+  // Meta rejects a media-header template sent without media.
+  const headerMediaMissing =
+    !!selectedTemplate &&
+    selectedTemplate.source !== "local" &&
+    ["IMAGE", "VIDEO", "DOCUMENT"].includes(selectedTemplate.headerType ?? "") &&
+    !campaignMedia &&
+    !selectedTemplate.headerMediaUrl;
 
-  const handleLaunchCampaign = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const [isSubmitting, setIsSubmitting] = useState<"send" | "draft" | null>(null);
+
+  const submitCampaign = async (draft: boolean) => {
     if (!selectedTemplate || selectedTemplate.approvalStatus !== "APPROVED") {
       setLaunchError("Select an approved WhatsApp template first.");
       return;
     }
+    if (!campaignName.trim()) {
+      setLaunchError("Give the campaign a name.");
+      return;
+    }
+    if (audienceBlocked) {
+      setLaunchError("Select at least one guest to invite, or switch to Segment.");
+      return;
+    }
 
     setLaunchError("");
+    setIsSubmitting(draft ? "draft" : "send");
     try {
       await createCampaign({
         eventId: currentEventId,
         name: campaignName,
         templateId: selectedTemplate.id,
         mediaId: campaignMedia?.id,
-        scheduledFor: scheduleChoice === "later" ? new Date(scheduledDateTime).toISOString() : undefined,
-        targetSegment: {
-          category: targetSegment === "all" ? undefined : targetSegment,
-        },
+        draft: draft || undefined,
+        scheduledFor: !draft && scheduleChoice === "later" ? new Date(scheduledDateTime).toISOString() : undefined,
+        targetSegment,
       });
     } catch (err) {
       setLaunchError(errorMessage(err, "Could not create the campaign."));
       return;
+    } finally {
+      setIsSubmitting(null);
     }
 
+    if (usingSelection) {
+      // The selection has been saved on the campaign.
+      clearCampaignSelection();
+      setGuestSelection(null);
+      switchAudienceMode("segment");
+    }
     closeCampaignModal();
     setCampaignName("");
   };
 
-  const handleSendTestMessage = async () => {
-    if (!testMobileNumber) return;
-    setTestSentMessage("");
-    setTestError("");
-    if (!selectedTemplate) {
-      setTestError("Select an approved template first.");
-      return;
-    }
-    setIsSendingTest(true);
-    try {
-      const res = await campaignService.testDraftCampaign({
-        eventId: currentEventId,
-        templateId: selectedTemplate.id,
-        mediaId: campaignMedia?.id,
-        mobile: testMobileNumber,
-      });
-      setTestSentMessage(res.message);
-    } catch (err) {
-      setTestError(errorMessage(err, "Could not send the test message."));
-    } finally {
-      setIsSendingTest(false);
-    }
+  const handleLaunchCampaign = (e: React.FormEvent) => {
+    e.preventDefault();
+    void submitCampaign(false);
   };
+
 
   return (
     <DashboardShell>
@@ -228,6 +346,7 @@ export default function CampaignsPage() {
               size="sm"
               onClick={() => {
                 setSelectedTemplateId(approvedTemplates[0]?.id || "");
+                switchAudienceMode(pickedIds.length ? "selected" : "segment");
                 setIsNewCampaignModalOpen(true);
               }}
               className="text-xs"
@@ -237,6 +356,8 @@ export default function CampaignsPage() {
           )}
         </div>
       </div>
+
+      <WhatsAppStatusBanner />
 
       {/* Tabs */}
       <div className="mb-6 flex border-b border-slate-200">
@@ -265,6 +386,11 @@ export default function CampaignsPage() {
       {/* TAB 1: CAMPAIGNS LIST */}
       {activeTab === "campaigns" && (
         <div className="space-y-4">
+          {actionError && (
+            <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+              {actionError}
+            </p>
+          )}
           {isLoadingCampaigns ? (
             <div className="p-12 text-center text-xs text-slate-400">Loading campaigns...</div>
           ) : campaigns.length === 0 ? (
@@ -276,6 +402,10 @@ export default function CampaignsPage() {
               const statusCfg = CAMPAIGN_STATUS_CONFIG[camp.status] || CAMPAIGN_STATUS_CONFIG.draft;
               const isRunning = camp.status === "running";
               const isPaused = camp.status === "paused";
+              const canStartNow = camp.status === "draft" || camp.status === "scheduled";
+              const canCancel = ["draft", "scheduled", "running", "paused"].includes(camp.status);
+              const canSend = can("campaigns:send");
+              const isBusy = busyCampaignId === camp.id;
 
               return (
                 <Card key={camp.id} className="hover:border-slate-300 transition-all">
@@ -289,8 +419,14 @@ export default function CampaignsPage() {
                           </Badge>
                         </div>
                         <p className="text-xs text-slate-500 mt-0.5">
-                          Template: <span className="font-mono font-medium text-slate-700">{camp.templateName}</span> • Target: {camp.targetSegment.category || "All Guests"}
+                          Template: <span className="font-mono font-medium text-slate-700">{camp.templateName}</span> • Target:{" "}
+                          {describeSegment(camp.targetSegment)}
                         </p>
+                        {camp.failureReason && (
+                          <p className="text-xs text-rose-700 mt-0.5 flex items-center gap-1">
+                            <AlertCircle className="w-3.5 h-3.5 shrink-0" /> {camp.failureReason}
+                          </p>
+                        )}
                         {camp.media && (
                           <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-1">
                             {camp.media.type === "video" ? (
@@ -304,25 +440,46 @@ export default function CampaignsPage() {
                       </div>
 
                       {/* Controls */}
-                      <div className="flex items-center gap-2">
-                        {isRunning && (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Button variant="ghost" size="sm" onClick={() => setRecipientsCampaign(camp)} className="text-xs text-indigo-700">
+                          <ListChecks className="w-3.5 h-3.5 mr-1" /> Recipients
+                        </Button>
+                        {canSend && canStartNow && (
+                          <Button
+                            variant="primary"
+                            size="sm"
+                            isLoading={isBusy}
+                            onClick={() => runCampaignAction(camp.id, () => sendCampaign(camp.id), "Could not start the campaign.")}
+                            className="text-xs"
+                          >
+                            <Send className="w-3.5 h-3.5 mr-1" /> Send Now
+                          </Button>
+                        )}
+                        {canSend && isRunning && (
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => pauseCampaign(camp.id)}
+                            isLoading={isBusy}
+                            onClick={() => runCampaignAction(camp.id, () => pauseCampaign(camp.id), "Could not pause the campaign.")}
                             className="text-xs text-amber-700"
                           >
                             <Pause className="w-3.5 h-3.5 mr-1" /> Pause Campaign
                           </Button>
                         )}
-                        {isPaused && (
+                        {canSend && isPaused && (
                           <Button
                             variant="primary"
                             size="sm"
-                            onClick={() => resumeCampaign(camp.id)}
+                            isLoading={isBusy}
+                            onClick={() => runCampaignAction(camp.id, () => resumeCampaign(camp.id), "Could not resume the campaign.")}
                             className="text-xs"
                           >
                             <Play className="w-3.5 h-3.5 mr-1" /> Resume Sending
+                          </Button>
+                        )}
+                        {canSend && canCancel && (
+                          <Button variant="outline" size="sm" disabled={isBusy} onClick={() => setCancelTarget(camp)} className="text-xs text-rose-700">
+                            <Ban className="w-3.5 h-3.5 mr-1" /> Cancel
                           </Button>
                         )}
                         {camp.scheduledFor && (
@@ -338,7 +495,13 @@ export default function CampaignsPage() {
                     <div className="grid grid-cols-2 sm:grid-cols-6 gap-3 pt-4 text-xs">
                       <div className="rounded-lg bg-slate-50 p-2.5 border border-slate-100">
                         <span className="text-[10px] uppercase font-bold text-slate-400">Total Targeted</span>
-                        <p className="text-base font-bold text-slate-900">{camp.metrics?.totalTargeted || 0}</p>
+                        {isRunning && !camp.recipientsBuiltAt ? (
+                          <p className="text-xs font-semibold text-slate-500 flex items-center gap-1 pt-1">
+                            <RefreshCw className="w-3 h-3 animate-spin" /> Preparing recipients...
+                          </p>
+                        ) : (
+                          <p className="text-base font-bold text-slate-900">{camp.metrics?.totalTargeted || 0}</p>
+                        )}
                       </div>
                       <div className="rounded-lg bg-indigo-50/50 p-2.5 border border-indigo-100">
                         <span className="text-[10px] uppercase font-bold text-indigo-500">Sent Outbound</span>
@@ -449,8 +612,35 @@ export default function CampaignsPage() {
                     )}
                   </div>
 
+                  {isApproved && tmpl.source === "local" && !isWhatsAppDryRun && (
+                    <p className="text-[11px] text-rose-700">Local test template: it does not exist in WhatsApp and cannot be sent live.</p>
+                  )}
+                  {tmpl.mappingProblems && tmpl.mappingProblems.length > 0 && (
+                    <ul className="text-[11px] text-amber-800 list-disc pl-4">
+                      {tmpl.mappingProblems.map((p) => (
+                        <li key={p}>{p}</li>
+                      ))}
+                    </ul>
+                  )}
                   <div className="flex items-center justify-between text-[11px] text-slate-500 pt-2 border-t border-slate-100">
-                    <span>Variables: <b>{tmpl.variables.length}</b> placeholders</span>
+                    <span>
+                      Variables: <b>{tmpl.variables.length}</b> placeholders
+                      {["IMAGE", "VIDEO", "DOCUMENT"].includes(tmpl.headerType ?? "") && (
+                        <Badge variant="info" size="sm" className="ml-1.5">
+                          Needs {tmpl.headerType?.toLowerCase()}
+                        </Badge>
+                      )}
+                    </span>
+                    {tmpl.source !== "local" && (can("campaigns:create") || can("settings:manage")) && (
+                      <Button
+                        variant={tmpl.mappingProblems?.length ? "primary" : "ghost"}
+                        size="sm"
+                        className="text-[11px] h-7"
+                        onClick={() => setMappingTemplate(tmpl)}
+                      >
+                        Map Fields
+                      </Button>
+                    )}
                     {!isApproved && (
                       <span className="text-amber-700 font-semibold flex items-center gap-1">
                         <AlertCircle className="w-3.5 h-3.5" /> Meta Pending
@@ -476,7 +666,11 @@ export default function CampaignsPage() {
         isOpen={isNewCampaignModalOpen}
         onClose={closeCampaignModal}
         title="Schedule Invitation Campaign"
-        description="Select an approved WhatsApp template, choose your target audience, and send."
+        description={
+          audienceMode === "selected"
+            ? "Pick the guests to invite, choose an approved WhatsApp template, and send. Opt-outs and invalid numbers are always skipped."
+            : "Select an approved WhatsApp template, choose your target audience, and send."
+        }
         maxWidth="3xl"
       >
         <form onSubmit={handleLaunchCampaign} className="space-y-4">
@@ -493,9 +687,14 @@ export default function CampaignsPage() {
               <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
                 Approved WhatsApp Template
               </label>
+              {unmappedApproved.length > 0 && (
+                <p className="mb-1 text-[11px] text-amber-700">
+                  {unmappedApproved.length} approved template{unmappedApproved.length === 1 ? " needs" : "s need"} fields mapped (Templates tab) before sending.
+                </p>
+              )}
               {approvedTemplates.length === 0 ? (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                  No approved templates yet.{" "}
+                  No sendable templates yet.{" "}
                   <button type="button" onClick={goToTemplates} className="font-semibold underline cursor-pointer">
                     {isWhatsAppDryRun ? "Create a test template" : "Sync templates from WhatsApp"}
                   </button>
@@ -518,21 +717,92 @@ export default function CampaignsPage() {
 
             <div>
               <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
-                Audience Segment Filter
+                {usingSelection ? "Additional Filter (Optional)" : "Audience Segment"}
               </label>
               <select
-                aria-label="Audience Segment Filter"
-                value={targetSegment}
-                onChange={(e) => setTargetSegment(e.target.value)}
+                aria-label={usingSelection ? "Additional filter for selected guests" : "Audience Segment"}
+                value={segmentChoice}
+                onChange={(e) => setSegmentChoice(e.target.value)}
                 className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900"
               >
-                <option value="all">All Uninvited Guests</option>
-                <option value="VVIP">VVIP Guests Only</option>
-                <option value="VIP">VIP Tier</option>
-                <option value="Family">Family Circle</option>
-                <option value="Corporate">Corporate & Partners</option>
+                {usingSelection ? (
+                  <>
+                    <option value="all">No extra filter: all selected guests</option>
+                    <option value="uninvited">Only selected guests not yet invited</option>
+                  </>
+                ) : (
+                  <>
+                    <option value="uninvited">All guests not yet invited</option>
+                    <option value="all">All guests (including already invited)</option>
+                  </>
+                )}
+                {SEGMENT_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {usingSelection ? `Only selected: ${o.label}` : o.label}
+                  </option>
+                ))}
               </select>
             </div>
+          </div>
+
+          {/* Audience: segment, or the guests selected on the Guests page */}
+          <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">Audience</span>
+              <div className="flex gap-1.5" role="radiogroup" aria-label="Audience mode">
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={audienceMode === "segment"}
+                  onClick={() => switchAudienceMode("segment")}
+                  className={`rounded-lg border px-2.5 py-1 text-xs font-semibold cursor-pointer ${
+                    audienceMode === "segment" ? "border-indigo-600 bg-indigo-50 text-indigo-700" : "border-slate-200 text-slate-600"
+                  }`}
+                >
+                  Segment
+                </button>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={audienceMode === "selected"}
+                  onClick={() => switchAudienceMode("selected")}
+                  className={`rounded-lg border px-2.5 py-1 text-xs font-semibold cursor-pointer ${
+                    audienceMode === "selected" ? "border-indigo-600 bg-indigo-50 text-indigo-700" : "border-slate-200 text-slate-600"
+                  }`}
+                >
+                  <Users className="w-3.5 h-3.5 inline mr-1" />
+                  Selected guests ({pickedIds.length})
+                </button>
+              </div>
+            </div>
+
+            {audienceMode === "selected" && (
+              <GuestPicker guests={eventGuests} selectedIds={pickedIds} onChange={setPickedIds} isLoading={isLoadingGuests} />
+            )}
+            {audienceBlocked ? (
+              <p className="text-xs text-slate-500">Tick one or more guests to invite.</p>
+            ) : (
+              <p className="text-xs text-slate-600" aria-live="polite">
+                {isLoadingAudience && !audience ? (
+                  "Counting recipients..."
+                ) : audience ? (
+                  <>
+                    <b className="text-slate-900">{audience.eligible}</b> guest{audience.eligible === 1 ? "" : "s"} will receive this invitation
+                    {Object.entries(audience.suppressed).some(([, n]) => n) && (
+                      <>
+                        {" "}
+                        • skipped:{" "}
+                        {Object.entries(audience.suppressed)
+                          .filter(([, n]) => n)
+                          .map(([reason, n]) => `${n} ${SUPPRESSION_LABELS[reason] ?? reason}`)
+                          .join(", ")}
+                      </>
+                    )}
+                    {audience.selectedNotMatched > 0 && <> • {audience.selectedNotMatched} selected guest{audience.selectedNotMatched === 1 ? "" : "s"} excluded by the filter or a cancelled invitation</>}
+                  </>
+                ) : null}
+              </p>
+            )}
           </div>
 
           {/* Invitation Media (optional) */}
@@ -581,6 +851,14 @@ export default function CampaignsPage() {
             )}
 
             {mediaError && <p className="text-xs text-rose-600">{mediaError}</p>}
+            {headerMediaMissing && (
+              <p className="text-xs text-amber-700 flex items-start gap-1">
+                <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                {selectedTemplate?.headerType === "DOCUMENT"
+                  ? "This template was approved with a DOCUMENT header: set its document link in Map Fields before sending."
+                  : `This template was approved with ${selectedTemplate?.headerType === "VIDEO" ? "a VIDEO" : "an IMAGE"} header: attach one to send it.`}
+              </p>
+            )}
             {mediaTemplateMismatch && (
               <p className="text-xs text-amber-700 flex items-start gap-1">
                 <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
@@ -619,35 +897,6 @@ export default function CampaignsPage() {
               </div>
             </div>
           )}
-
-          {/* Test WhatsApp Message Sending */}
-          <div className="rounded-xl border border-slate-200 p-3 bg-white space-y-2">
-            <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block">
-              Send Test Message to Staff Phone:
-            </span>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={testMobileNumber}
-                onChange={(e) => setTestMobileNumber(e.target.value)}
-                placeholder="+91 98200 12345"
-                className="flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-mono text-slate-900"
-              />
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={handleSendTestMessage}
-                isLoading={isSendingTest}
-              >
-                Send Test
-              </Button>
-            </div>
-            {testSentMessage && (
-              <p className="text-xs text-emerald-700 font-semibold">{testSentMessage}</p>
-            )}
-            {testError && <p className="text-xs text-rose-600">{testError}</p>}
-          </div>
 
           {/* Dispatch Timing */}
           <div className="grid grid-cols-2 gap-4">
@@ -704,12 +953,79 @@ export default function CampaignsPage() {
             >
               Cancel
             </Button>
-            <Button type="submit" size="sm" disabled={isUploadingMedia || mediaTemplateMismatch || !selectedTemplate}>
-              <Send className="w-3.5 h-3.5 mr-1" />
-              {scheduleChoice === "now" ? "Send Campaign" : "Schedule Campaign"}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              isLoading={isSubmitting === "draft"}
+              disabled={isUploadingMedia || mediaTemplateMismatch || !selectedTemplate || audienceBlocked || isSubmitting !== null}
+              onClick={() => void submitCampaign(true)}
+            >
+              <FileText className="w-3.5 h-3.5 mr-1" /> Save as Draft
             </Button>
+            {can("campaigns:send") && (
+              <Button
+                type="submit"
+                size="sm"
+                isLoading={isSubmitting === "send"}
+                disabled={isUploadingMedia || mediaTemplateMismatch || headerMediaMissing || !selectedTemplate || audienceBlocked || isSubmitting !== null || audience?.eligible === 0}
+              >
+                <Send className="w-3.5 h-3.5 mr-1" />
+                {scheduleChoice === "now" ? "Send Campaign" : "Schedule Campaign"}
+              </Button>
+            )}
           </div>
         </form>
+      </Modal>
+
+      <CampaignRecipientsModal
+        campaign={recipientsCampaign}
+        onClose={() => {
+          setRecipientsCampaign(null);
+          // The modal may have shown newer statuses than the card: bring the metrics up to date.
+          void refetchCampaigns();
+        }}
+      />
+
+      {mappingTemplate && (
+        <TemplateMappingModal
+          template={mappingTemplate}
+          fields={templateCapabilities?.variables ?? []}
+          onClose={() => setMappingTemplate(null)}
+          onSave={(mapping) => updateTemplateMapping({ id: mappingTemplate.id, mapping })}
+        />
+      )}
+
+      {/* Cancel confirmation */}
+      <Modal
+        isOpen={!!cancelTarget}
+        onClose={() => setCancelTarget(null)}
+        title="Cancel this campaign?"
+        description={cancelTarget ? `"${cancelTarget.name}"` : undefined}
+        maxWidth="md"
+      >
+        <div className="space-y-4 text-xs text-slate-700">
+          <p>
+            Guests who have not been messaged yet will not receive it. Messages already sent cannot be recalled. This cannot be undone.
+          </p>
+          <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+            <Button variant="outline" size="sm" onClick={() => setCancelTarget(null)}>
+              Keep Campaign
+            </Button>
+            <Button
+              variant="danger"
+              size="sm"
+              isLoading={!!cancelTarget && busyCampaignId === cancelTarget.id}
+              onClick={async () => {
+                if (!cancelTarget) return;
+                const ok = await runCampaignAction(cancelTarget.id, () => cancelCampaign(cancelTarget.id), "Could not cancel the campaign.");
+                if (ok) setCancelTarget(null);
+              }}
+            >
+              <Ban className="w-3.5 h-3.5 mr-1" /> Cancel Campaign
+            </Button>
+          </div>
+        </div>
       </Modal>
     </DashboardShell>
   );

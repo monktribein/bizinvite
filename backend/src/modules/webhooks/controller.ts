@@ -26,7 +26,8 @@ export async function receive(req: Request, res: Response) {
       throw Errors.unauthorized("Invalid webhook signature");
     }
   } else if (env.NODE_ENV === "production") {
-    // Unreachable with a valid production env, kept as a hard stop.
+    // Live production cannot start without the app secret (see whatsappEnvIssues), so this is a
+    // dry-run deployment: nothing was sent, and unsigned payloads are never trusted in production.
     throw Errors.unauthorized("Webhook signature verification is not configured");
   }
 

@@ -5,7 +5,14 @@ import { recordAudit } from "../audit";
 import { fetchMessageTemplates, RemoteTemplate } from "../conversations/whatsapp.client";
 import { Organization } from "../organizations/model";
 import { Template, TemplateDoc, toTemplateDto } from "./model";
-import { extractPlaceholders, inferQuickReplyAction, unmappedVariables } from "./variables";
+import {
+  bodyParameterNames,
+  extractPlaceholders,
+  inferQuickReplyAction,
+  isSupportedVariable,
+  templateMappingProblems,
+  unmappedVariables,
+} from "./variables";
 
 function approvalFromMeta(status: string): "APPROVED" | "PENDING" | "REJECTED" {
   if (status === "APPROVED") return "APPROVED";
@@ -28,17 +35,28 @@ export async function findTemplateOrThrow(organizationId: string, templateId: st
 }
 
 /**
- * The single gate used before any template is sent: must be approved by Meta and
- * every placeholder must be bound to a supported business field.
+ * Why a template cannot be sent right now, or null. Used by the API gate below and by the
+ * background jobs, which re-check at send time.
+ */
+export function templateSendProblem(template: TemplateDoc | null | undefined): string | null {
+  if (!template) return "Template not found";
+  if (template.approvalStatus !== "APPROVED") return `Template "${template.name}" is not approved by Meta`;
+  if (template.source === "local" && !isWhatsAppDryRun()) {
+    return `"${template.name}" is a local test template and does not exist in WhatsApp. Sync and use a template approved in WhatsApp Manager.`;
+  }
+  const problems = templateMappingProblems(template);
+  if (problems.length) return `Template "${template.name}" is not fully mapped: ${problems.join("; ")}`;
+  return null;
+}
+
+/**
+ * The single gate used before any template is sent: approved by Meta, real (not a local test
+ * template) when sending live, and every placeholder bound to a supported business field.
  */
 export function assertTemplateSendable(template: TemplateDoc): void {
   if (template.approvalStatus !== "APPROVED") throw Errors.templateNotApproved(template.name);
-  const unmapped = unmappedVariables(template);
-  if (unmapped.length) {
-    throw Errors.validation(`Template "${template.name}" has unmapped variables: ${unmapped.join(", ")}`, {
-      templateId: [`Map these variables before sending: ${unmapped.join(", ")}`],
-    });
-  }
+  const problem = templateSendProblem(template);
+  if (problem) throw Errors.validation(problem, { templateId: [problem] });
 }
 
 function mapRemoteTemplate(remote: RemoteTemplate, existing?: TemplateDoc | null) {
@@ -47,14 +65,21 @@ function mapRemoteTemplate(remote: RemoteTemplate, existing?: TemplateDoc | null
   const footer = remote.components.find((c) => c.type === "FOOTER");
   const buttons = remote.components.find((c) => c.type === "BUTTONS")?.buttons ?? [];
   const { names, named } = extractPlaceholders(body?.text ?? "");
+  const headerName = header?.format === "TEXT" ? extractPlaceholders(header.text ?? "").names[0] : undefined;
 
-  // Keep an organizer's variable bindings when the placeholder count is unchanged.
-  const variables =
-    existing && existing.variables.length === names.length
-      ? existing.variables
-      : named
-        ? names
-        : names.map((n) => `var_${n}`);
+  // Keep an organizer's variable bindings when the placeholders are unchanged.
+  const sameBody = existing && existing.variables.length === names.length && bodyParameterNames(existing).join() === names.join();
+  const variables = sameBody
+    ? existing.variables
+    : named
+      ? names.map((n) => (isSupportedVariable(n) ? n : `var_${n}`))
+      : names.map((n) => `var_${n}`);
+  const headerVariable =
+    headerName && existing?.headerParameterName === headerName && existing.headerVariable
+      ? existing.headerVariable
+      : headerName && isSupportedVariable(headerName)
+        ? headerName
+        : undefined;
 
   return {
     externalId: remote.id,
@@ -72,13 +97,21 @@ function mapRemoteTemplate(remote: RemoteTemplate, existing?: TemplateDoc | null
     bodyText: body?.text ?? "",
     footerText: footer?.text,
     variables,
+    parameterNames: names,
     namedParameters: named,
-    buttons: buttons.map((b, i) => ({
-      type: b.type as "QUICK_REPLY" | "URL" | "PHONE_NUMBER",
-      text: b.text,
-      url: b.url,
-      payload: existing?.buttons?.[i]?.payload ?? (b.type === "QUICK_REPLY" ? inferQuickReplyAction(b.text) : undefined),
-    })),
+    headerParameterName: headerName,
+    headerVariable,
+    buttons: buttons.map((b, i) => {
+      const dynamicUrl = b.type === "URL" && extractPlaceholders(b.url ?? "").names.length > 0;
+      return {
+        type: b.type as "QUICK_REPLY" | "URL" | "PHONE_NUMBER",
+        text: b.text,
+        url: b.url,
+        payload: existing?.buttons?.[i]?.payload ?? (b.type === "QUICK_REPLY" ? inferQuickReplyAction(b.text) : undefined),
+        dynamicUrl,
+        urlVariable: dynamicUrl ? (existing?.buttons?.[i]?.urlVariable ?? undefined) : undefined,
+      };
+    }),
     lastSyncedAt: new Date(),
   };
 }
@@ -124,7 +157,13 @@ export async function syncTemplates(actor: ActorContext) {
 export async function updateTemplateMapping(
   actor: ActorContext,
   templateId: string,
-  changes: { variables?: string[]; buttonPayloads?: Array<string | null>; headerMediaUrl?: string }
+  changes: {
+    variables?: string[];
+    buttonPayloads?: Array<string | null>;
+    headerMediaUrl?: string | null;
+    headerVariable?: string | null;
+    buttonUrlVariables?: Array<string | null>;
+  }
 ) {
   const template = await findTemplateOrThrow(actor.organizationId, templateId);
   if (changes.variables) {
@@ -141,7 +180,19 @@ export async function updateTemplateMapping(
       if (payload !== undefined && b.type === "QUICK_REPLY") b.payload = payload ?? undefined;
     });
   }
-  if (changes.headerMediaUrl !== undefined) template.headerMediaUrl = changes.headerMediaUrl;
+  if (changes.buttonUrlVariables) {
+    template.buttons.forEach((b, i) => {
+      const variable = changes.buttonUrlVariables?.[i];
+      if (variable !== undefined && b.type === "URL" && b.dynamicUrl) b.urlVariable = variable ?? undefined;
+    });
+  }
+  if (changes.headerVariable !== undefined) {
+    if (changes.headerVariable && !template.headerParameterName) {
+      throw Errors.validation("This template's header has no placeholder", { headerVariable: ["The header has no placeholder to fill"] });
+    }
+    template.headerVariable = changes.headerVariable ?? undefined;
+  }
+  if (changes.headerMediaUrl !== undefined) template.headerMediaUrl = changes.headerMediaUrl ?? undefined;
   await template.save();
   await recordAudit(actor, { action: "template.mapping_updated", resourceType: "campaign", resourceId: template.id, details: `Updated variable mapping for ${template.name}` });
   return toTemplateDto(template);

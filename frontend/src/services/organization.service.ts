@@ -1,7 +1,7 @@
 import { apiClient } from "@/lib/api/client";
 import { mockAdapter } from "@/lib/api/mock-adapter";
 import { isMockEnabled } from "./config";
-import { Organization, TeamMember } from "@/types/organization";
+import { Organization, TeamMember, WhatsAppConnectionStatus } from "@/types/organization";
 import { AuditLog, ConsentRecord } from "@/types/audit";
 
 export const organizationService = {
@@ -10,6 +10,24 @@ export const organizationService = {
       return mockAdapter.getOrganization();
     }
     const response = await apiClient.get<Organization>(`/api/v1/organizations/${orgId}`);
+    return response.data;
+  },
+
+  /** Real WhatsApp connection state: live or dry-run, sender number, webhook readiness. */
+  async getWhatsAppStatus(orgId: string): Promise<WhatsAppConnectionStatus> {
+    if (isMockEnabled()) {
+      return mockAdapter.getWhatsAppStatus();
+    }
+    const response = await apiClient.get<WhatsAppConnectionStatus>(`/api/v1/organizations/${orgId}/whatsapp-status`);
+    return response.data;
+  },
+
+  /** Subscribes the app to the WABA's webhooks so delivery, read and reply events arrive. */
+  async subscribeWhatsAppWebhooks(orgId: string): Promise<WhatsAppConnectionStatus> {
+    if (isMockEnabled()) {
+      return mockAdapter.getWhatsAppStatus();
+    }
+    const response = await apiClient.post<WhatsAppConnectionStatus>(`/api/v1/organizations/${orgId}/whatsapp/subscribe-webhooks`);
     return response.data;
   },
 

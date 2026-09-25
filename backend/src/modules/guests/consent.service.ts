@@ -3,6 +3,7 @@ import type { ActorContext } from "../../common/utils/context";
 import type { Pagination } from "../../common/validators/common";
 import { recordAudit } from "../audit";
 import { suppressPendingRecipientsForGuest } from "../campaigns/service";
+import { INVALID_RECIPIENT_CODES, OPT_OUT_ERROR_CODES } from "../conversations/whatsapp.client";
 import { cancelPendingRemindersForGuests } from "../reminder-rules/service";
 import { Consent, EventGuest, GuestDoc } from "./model";
 import { guestRepository } from "./repository";
@@ -123,6 +124,21 @@ export async function setSuppression(actor: ActorContext, contact: GuestDoc, sup
     details: `${suppressed ? "Suppressed" : "Resumed"} communication for ${contact.name}`,
     metadata: { reason },
   });
+}
+
+/**
+ * Applies what a permanent WhatsApp error code says about the contact, from a send attempt
+ * or a failed-status webhook: an undeliverable number is marked invalid, and 131050 (the
+ * user stopped messages from this business) is recorded as an opt-out. Other codes, such as
+ * 131049 (per-user marketing limit), fail only that message.
+ */
+export async function applyPermanentSendFailure(actor: ActorContext, contact: GuestDoc, code: number | undefined) {
+  if (code === undefined) return;
+  if (INVALID_RECIPIENT_CODES.has(code)) {
+    await markMobileInvalid(actor, contact, `WhatsApp error ${code}`);
+  } else if (OPT_OUT_ERROR_CODES.has(code)) {
+    await optOutContact(actor, contact, "whatsapp", `Recipient stopped messages from this business (WhatsApp error ${code})`);
+  }
 }
 
 /** Called when WhatsApp reports the number cannot receive messages. */

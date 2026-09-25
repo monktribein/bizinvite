@@ -14,6 +14,15 @@ function rateLimitedResponse(req: Request, res: Response): void {
 const skipInTests = () => env.NODE_ENV === "test";
 
 /**
+ * Meta's webhook deliveries are exempt from the per-IP API limit: a large campaign produces
+ * several status events per guest from a few Meta IPs, and a throttled delivery arrives late.
+ * They are authenticated by their signature and processed asynchronously instead.
+ */
+export function isRateLimitExempt(path: string): boolean {
+  return path.startsWith("/webhooks/");
+}
+
+/**
  * In-memory stores: limits apply per API instance. Use a shared store (for example
  * a MongoDB-backed one) if the API is scaled horizontally.
  */
@@ -22,7 +31,7 @@ export const apiRateLimit = rateLimit({
   limit: 600,
   standardHeaders: "draft-7",
   legacyHeaders: false,
-  skip: skipInTests,
+  skip: (req) => skipInTests() || isRateLimitExempt(req.path),
   handler: rateLimitedResponse,
 });
 

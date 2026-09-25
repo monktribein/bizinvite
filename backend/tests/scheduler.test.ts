@@ -94,12 +94,18 @@ describe("MongoDB job scheduler", () => {
     await scheduler.start();
     try {
       expect(await ScheduledJob.countDocuments({ type: "reminder.plan" }).setOptions(CROSS_TENANT)).toBe(1);
-      const event = await WebhookEvent.create({ kind: "status", dedupeKey: "status:wamid.1:sent", waMessageId: "wamid.1", payload: { id: "wamid.1", status: "sent" } });
+      // An inbound message from a number no organization has messaged: processed and completed.
+      const event = await WebhookEvent.create({
+        kind: "message",
+        dedupeKey: "msg:wamid.1",
+        waMessageId: "wamid.1",
+        payload: { id: "wamid.1", from: "919800000001", type: "text", text: { body: "hi" } },
+      });
       // Enqueueing wakes the scheduler; no need to wait for the (long) poll interval.
       const job = await enqueueJob({ type: "whatsapp.process-webhook", payload: { webhookEventId: event.id }, dedupeKey: `webhook:${event.id}` });
       const deadline = Date.now() + 5000;
       while ((await findJob(job!._id))!.status !== "completed" && Date.now() < deadline) await new Promise((r) => setTimeout(r, 25));
-      expect(await findJob(job!._id)).toMatchObject({ status: "completed", result: { outcome: "unknown_message" } });
+      expect(await findJob(job!._id)).toMatchObject({ status: "completed", result: { outcome: "unknown_sender" } });
       expect(scheduler.status().state).toBe("running");
     } finally {
       await scheduler.stop();

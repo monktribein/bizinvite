@@ -18,6 +18,8 @@ const campaignSchema = new Schema(
       groupIds: [{ type: Schema.Types.ObjectId, ref: "GuestGroup" }],
       /** Only guests who have never received an invitation message. */
       onlyUninvited: { type: Boolean },
+      /** Explicit guest selection; narrows the other filters instead of replacing them. */
+      eventGuestIds: { type: [{ type: Schema.Types.ObjectId, ref: "EventGuest" }], default: undefined },
     },
     /** Optional image/video sent as the template header (file stored in the campaignMedia GridFS bucket). */
     media: {

@@ -18,17 +18,19 @@ is invalid. The only external service the backend needs is MongoDB; the minimum 
 | `SCHEDULER_ENABLED` | | `true` | Run the MongoDB-backed job scheduler in this process. Set `false` only on API instances when a separate `npm run start:worker` process runs it. |
 | `CORS_ORIGIN` | | `http://localhost:3000` | Comma-separated browser origins |
 | `WHATSAPP_API_VERSION` | | `v21.0` | |
-| `WHATSAPP_ACCESS_TOKEN` | production | | Empty outside production = dry-run sender |
-| `WHATSAPP_PHONE_NUMBER_ID` | production | | |
-| `WHATSAPP_BUSINESS_ACCOUNT_ID` | production | | |
-| `WHATSAPP_WEBHOOK_VERIFY_TOKEN` | production | | |
-| `WHATSAPP_APP_SECRET` | production | | When set, unsigned webhooks are rejected |
+| `WHATSAPP_ACCESS_TOKEN` | live sending | | Empty = dry-run sender (messages logged, not delivered) |
+| `WHATSAPP_PHONE_NUMBER_ID` | live production | | Platform default sender |
+| `WHATSAPP_BUSINESS_ACCOUNT_ID` | live production | | Platform default WABA (template sync, number checks) |
+| `WHATSAPP_WEBHOOK_VERIFY_TOKEN` | live production | | Needed for Meta's webhook subscription |
+| `WHATSAPP_APP_SECRET` | live production | | Verifies webhook signatures; production rejects unsigned webhooks |
+| `REQUIRE_WHATSAPP` | | | `true` makes production refuse to start in dry-run |
 | `S3_ENDPOINT` | | | Leave empty for AWS; set for MinIO or another S3-compatible service |
 | `S3_REGION` | | `ap-south-1` | |
 | `S3_BUCKET` | | | Needed only for background report exports |
 | `S3_ACCESS_KEY` / `S3_SECRET_KEY` | | | Omit to use the default AWS credential chain (instance role) |
 | `QR_SIGNING_SECRET` | yes | | ≥ 32 characters. HMAC key for pass tokens; rotating it invalidates every issued pass. |
 | `PUBLIC_BASE_URL` | | | Public API origin (e.g. `https://api.bizinvite.io`), used in pass QR links sent to guests |
+| `DNS_SERVERS` | | | Comma-separated DNS resolvers for Node (e.g. `8.8.8.8,1.1.1.1`). Set only if startup fails with `querySrv ECONNREFUSED` |
 | `LOG_LEVEL` | | `info` | pino level |
 
 Generate secrets with `openssl rand -hex 48` (or `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`).

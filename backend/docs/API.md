@@ -62,7 +62,9 @@ Base path: `API_PREFIX` (default `/api/v1`). Health endpoints are at the root.
 | GET | `/` | platform admin |
 | POST | `/` | platform admin: `{ name, slug?, plan, timezone?, owner: { name, email, password? } }` |
 | GET | `/:id` | member of `:id` |
-| PATCH | `/:id` | `settings:manage` (name, logoUrl, timezone, defaultCountryCode, whatsApp display/phoneNumberId/wabaId) |
+| PATCH | `/:id` | `settings:manage` (name, logoUrl, timezone, defaultCountryCode, whatsApp). `whatsApp.wabaId`, `phoneNumber` and `businessDisplayName` are **platform admin only** (403 otherwise). Organization users may set `whatsApp.phoneNumberId` only after an admin connected their own WABA, and only to a number Meta lists under it (422 otherwise); display name, number and quality rating are then filled from Meta. A phone number id belongs to one organization (409). `phoneNumberId: null` returns to the platform sender. |
+| GET | `/:id/whatsapp-status` | `settings:manage` or `campaigns:view`: `{ mode: live\|dry_run, sender (incl. live Meta verification), webhook (incl. wabaSubscribed), templates (approved, sendable), ready, warnings }` |
+| POST | `/:id/whatsapp/subscribe-webhooks` | `settings:manage`: subscribes the app to the WABA's webhooks; returns the status |
 | GET | `/:id/team` | `team:manage` or `settings:manage` |
 | GET | `/:id/audit-logs` | `settings:manage` or `team:manage`; `page`, `limit`, `resourceType`, `action` |
 | GET | `/:id/consents` | `guests:view`; `page`, `limit`, `status` |
@@ -115,17 +117,18 @@ Base path: `API_PREFIX` (default `/api/v1`). Health endpoints are at the root.
 | GET | `/templates/variables` | same; lists bindable variables and quick-reply actions |
 | POST | `/templates/sync` | `settings:manage` or `campaigns:create`: pulls templates and approval status from Meta |
 | GET | `/templates/:id` | view |
-| PATCH | `/templates/:id` | `{ variables?, buttonPayloads?, headerMediaUrl? }`: binds placeholders to business fields |
+| PATCH | `/templates/:id` | `{ variables?, headerVariable?, buttonUrlVariables?, buttonPayloads?, headerMediaUrl? }`: binds body, header and dynamic URL button placeholders to business fields; responses include `mappingProblems` |
 | POST | `/templates` | dry-run mode only (no WhatsApp credentials, non-production): local test template |
 
 ### Campaigns — `/campaigns`
 | Method | Path | Permission | Notes |
 |--------|------|-----------|-------|
 | GET | `/` | `campaigns:view` | `eventId`, `status`; includes live `metrics` (`totalTargeted`, `sent`, `delivered`, `read`, `failed`, `suppressed`, `pending`) |
-| POST | `/` | `campaigns:create` (+ `campaigns:send` unless `draft`) | No `scheduledFor` → **starts sending immediately** (matches the frontend "launch" flow). Future `scheduledFor` → `scheduled`. `draft: true` → only saved. The template must be `APPROVED` with all variables bound. |
-| GET | `/:id` | `campaigns:view` | |
+| POST | `/` | `campaigns:create` (+ `campaigns:send` unless `draft`) | No `scheduledFor` → **starts sending immediately** (matches the frontend "launch" flow). Future `scheduledFor` → `scheduled`. `draft: true` → only saved. The template must be `APPROVED` with all variables bound. `targetSegment`: `category`, `rsvpStatus`, `onlyVip`, `sessionIds`, `groupIds`, `onlyUninvited`, and `eventGuestIds` (explicit guest selection, 1–5000 invitation ids of this event, else 422). The selection is **an extra filter**: only selected guests that match every other filter are targeted, and opted-out, suppressed and invalid numbers are still suppressed. |
+| POST | `/audience-preview` | `campaigns:create` | `{ eventId, targetSegment }` → `{ matched, eligible, suppressed: { opted_out?, suppressed?, invalid_mobile?, contact_missing? }, selectedNotMatched }`; nothing is created |
+| GET | `/:id` | `campaigns:view` | `targetSegment.selectedGuestCount` everywhere; `targetSegment.eventGuestIds` only here |
 | PATCH | `/:id` | `campaigns:create` | draft/scheduled only |
-| GET | `/:id/recipients` | `campaigns:view` | `status`, `page`, `limit` |
+| GET | `/:id/recipients` | `campaigns:view` | `status`, `page`, `limit`; each row has `status`, timestamps, `errorCode`, `suppressionReason`, `errorMessage` |
 | POST | `/:id/send` | `campaigns:send` | start a draft/scheduled campaign now |
 | POST | `/:id/pause` · `/resume` · `/cancel` | `campaigns:send` | |
 | POST | `/:id/test` | `campaigns:send` | `{ mobile }` |

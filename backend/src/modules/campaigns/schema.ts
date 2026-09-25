@@ -2,6 +2,9 @@ import { z } from "zod";
 import { CAMPAIGN_STATUSES, GUEST_CATEGORIES, RECIPIENT_STATUSES, RSVP_STATUSES } from "../../common/constants/enums";
 import { isoDateSchema, objectIdSchema } from "../../common/validators/common";
 
+/** Upper bound for an explicit guest selection in one campaign. */
+export const MAX_SELECTED_GUESTS = 5000;
+
 export const targetSegmentSchema = z
   .object({
     category: z.enum(GUEST_CATEGORIES).optional(),
@@ -10,6 +13,16 @@ export const targetSegmentSchema = z
     sessionIds: z.array(objectIdSchema).max(30).optional(),
     groupIds: z.array(objectIdSchema).max(100).optional(),
     onlyUninvited: z.boolean().optional(),
+    /**
+     * Explicitly selected invitations (the frontend "guest id"). Narrows the segment above:
+     * only selected guests that also match every other filter and eligibility rule receive it.
+     */
+    eventGuestIds: z
+      .array(objectIdSchema)
+      .min(1, "Select at least one guest")
+      .max(MAX_SELECTED_GUESTS, `At most ${MAX_SELECTED_GUESTS} guests can be selected for one campaign`)
+      .transform((ids) => [...new Set(ids)])
+      .optional(),
   })
   .default({});
 
@@ -44,6 +57,8 @@ export const listCampaignsQuerySchema = z.object({
   status: z.enum(CAMPAIGN_STATUSES).optional(),
 });
 
+export const audiencePreviewSchema = z.object({ eventId: objectIdSchema, targetSegment: targetSegmentSchema });
+
 export const recipientsQuerySchema = z.object({ status: z.enum(RECIPIENT_STATUSES).optional() });
 
 export const testSendSchema = z.object({ mobile: z.string().trim().min(8).max(32) });
@@ -57,3 +72,4 @@ export const draftTestSendSchema = testSendSchema.extend({
 
 export type CreateCampaignInput = z.infer<typeof createCampaignSchema>;
 export type UpdateCampaignInput = z.infer<typeof updateCampaignSchema>;
+export type TargetSegmentInput = z.infer<typeof targetSegmentSchema>;

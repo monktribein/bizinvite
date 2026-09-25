@@ -114,6 +114,7 @@ describe("campaigns", () => {
     const t = await setupTenant();
     const event = await createEvent(t);
     const tpl = await createApprovedTemplate(t.org.id);
+    await createGuest(t, event.id);
     const res = await t.api.post("/api/v1/campaigns", {
       eventId: event.id,
       name: "Later",

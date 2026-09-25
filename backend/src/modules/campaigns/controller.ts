@@ -5,6 +5,7 @@ import { actorFromRequest } from "../../common/utils/context";
 import { sendPaginated, sendSuccess } from "../../common/utils/response";
 import { paginationSchema, parseId } from "../../common/validators/common";
 import {
+  audiencePreviewSchema,
   createCampaignSchema,
   draftTestSendSchema,
   listCampaignsQuerySchema,
@@ -67,6 +68,11 @@ export async function test(req: Request, res: Response) {
 
 export async function testDraft(req: Request, res: Response) {
   sendSuccess(req, res, await campaignService.sendDraftTestMessage(actorFromRequest(req), draftTestSendSchema.parse(req.body)));
+}
+
+/** POST /campaigns/audience-preview: who a segment (or guest selection) would reach, without creating anything. */
+export async function audiencePreview(req: Request, res: Response) {
+  sendSuccess(req, res, await campaignService.previewAudience(req.tenant!.organizationId, audiencePreviewSchema.parse(req.body)));
 }
 
 export async function recipients(req: Request, res: Response) {

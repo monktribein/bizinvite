@@ -43,7 +43,24 @@ class ApiClient {
     }
   }
 
-  private async refreshAccessToken(): Promise<string | null> {
+  /** In-flight refresh shared by every request that got a 401 at the same time. */
+  private refreshInFlight: Promise<string | null> | null = null;
+
+  /**
+   * Refresh tokens are single-use (rotated) and the backend revokes the whole session when one
+   * is presented twice. Dashboard pages fire several queries at once, so after the access token
+   * expires they all get a 401 together: they must share a single refresh call.
+   */
+  private refreshAccessToken(): Promise<string | null> {
+    if (!this.refreshInFlight) {
+      this.refreshInFlight = this.doRefreshAccessToken().finally(() => {
+        this.refreshInFlight = null;
+      });
+    }
+    return this.refreshInFlight;
+  }
+
+  private async doRefreshAccessToken(): Promise<string | null> {
     if (typeof window === "undefined") return null;
     const refreshToken = localStorage.getItem("bizinvite_refresh_token");
     if (!refreshToken) return null;
@@ -113,7 +130,9 @@ class ApiClient {
 
     // Handle 401 token refresh retry
     if (response.status === 401 && token) {
-      const newToken = await this.refreshAccessToken();
+      // Another request may already have refreshed while this one was in flight.
+      const current = this.getAccessToken();
+      const newToken = current && current !== token ? current : await this.refreshAccessToken();
       if (newToken) {
         defaultHeaders["Authorization"] = `Bearer ${newToken}`;
         response = await fetch(url, {

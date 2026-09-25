@@ -119,8 +119,22 @@ async function readMediaBuffer(fileId: Types.ObjectId): Promise<Buffer> {
  * WhatsApp only carries media on a template message as its header, so a synced Meta
  * template must declare a matching IMAGE/VIDEO header. Local dry-run templates accept either.
  */
-export function assertMediaMatchesTemplate(template: Pick<TemplateDoc, "name" | "source" | "headerType">, mediaType: CampaignMediaType | undefined) {
-  if (!mediaType || template.source === "local") return;
+export function assertMediaMatchesTemplate(
+  template: Pick<TemplateDoc, "name" | "source" | "headerType" | "headerMediaUrl">,
+  mediaType: CampaignMediaType | undefined
+) {
+  if (template.source === "local") return;
+  if (!mediaType) {
+    // Meta rejects a template with a media header when the message carries no media.
+    const header = template.headerType ?? "NONE";
+    if (["IMAGE", "VIDEO", "DOCUMENT"].includes(header) && !template.headerMediaUrl) {
+      const what = header === "DOCUMENT" ? "a document link on the template" : `an ${header.toLowerCase()} to the campaign (or a default media link on the template)`;
+      throw Errors.validation(`Template "${template.name}" has a ${header} header: attach ${what} before sending.`, {
+        mediaId: [`This template needs ${header === "DOCUMENT" ? "a DOCUMENT" : `an ${header}`} header`],
+      });
+    }
+    return;
+  }
   const expected = mediaType === "image" ? "IMAGE" : "VIDEO";
   if (template.headerType !== expected) {
     const has = template.headerType && template.headerType !== "NONE" ? `a ${template.headerType} header` : "no media header";

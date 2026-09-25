@@ -10,9 +10,9 @@ export const whatsappConfig = {
   appSecret: env.WHATSAPP_APP_SECRET,
 };
 
-/** True when real Cloud API calls can be made. */
+/** True when real Cloud API calls are made (live). The sender number may come from the organization. */
 export function isWhatsAppConfigured(): boolean {
-  return Boolean(whatsappConfig.accessToken && whatsappConfig.phoneNumberId);
+  return Boolean(whatsappConfig.accessToken);
 }
 
 /**
@@ -21,4 +21,13 @@ export function isWhatsAppConfigured(): boolean {
  */
 export function isWhatsAppDryRun(): boolean {
   return !isWhatsAppConfigured();
+}
+
+/** Logged at startup: WhatsApp states that work but lose data or safety. */
+export function whatsappStartupWarnings(): string[] {
+  if (isWhatsAppDryRun()) return ["WhatsApp is not configured: messages are logged, not sent (dry-run)"];
+  const warnings: string[] = [];
+  if (!whatsappConfig.appSecret) warnings.push("WHATSAPP_APP_SECRET is not set: webhooks are accepted without signature verification (never allowed in production)");
+  if (!whatsappConfig.webhookVerifyToken) warnings.push("WHATSAPP_WEBHOOK_VERIFY_TOKEN is not set: Meta cannot subscribe to delivery and reply webhooks");
+  return warnings;
 }

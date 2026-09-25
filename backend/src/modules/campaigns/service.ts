@@ -1,3 +1,4 @@
+import type { Types } from "mongoose";
 import { Errors } from "../../common/errors/app-error";
 import type { ActorContext } from "../../common/utils/context";
 import { systemActor } from "../../common/utils/context";
@@ -8,16 +9,16 @@ import type { Pagination } from "../../common/validators/common";
 import { cancelPendingJobs, enqueueJob } from "../../scheduler/jobs";
 import { recordAudit } from "../audit";
 import { phoneNumberIdFor, sendTemplateToGuest } from "../conversations/messaging.service";
-import { INVALID_RECIPIENT_CODES, WhatsAppSendError } from "../conversations/whatsapp.client";
+import { WhatsAppSendError } from "../conversations/whatsapp.client";
 import { Event } from "../events/model";
 import { findEventOrThrow } from "../events/service";
-import { markMobileInvalid } from "../guests/consent.service";
+import { applyPermanentSendFailure } from "../guests/consent.service";
 import { EventGuest, Guest } from "../guests/model";
 import { Organization } from "../organizations/model";
 import { EventSession } from "../sessions/model";
 import { buildVariableContext } from "../templates/context";
 import { Template, TemplateDoc } from "../templates/model";
-import { assertTemplateSendable, findTemplateOrThrow } from "../templates/service";
+import { assertTemplateSendable, findTemplateOrThrow, templateSendProblem } from "../templates/service";
 import {
   assertMediaMatchesTemplate,
   CampaignMediaType,
@@ -26,7 +27,7 @@ import {
   uploadStoredMediaToWhatsApp,
 } from "./media";
 import { Campaign, CampaignDoc, CampaignRecipient } from "./model";
-import type { CreateCampaignInput, UpdateCampaignInput } from "./schema";
+import type { CreateCampaignInput, TargetSegmentInput, UpdateCampaignInput } from "./schema";
 
 const RECIPIENT_BATCH = 500;
 const STALE_CLAIM_MS = 15 * 60 * 1000;
@@ -34,6 +35,9 @@ const STALE_CLAIM_MS = 15 * 60 * 1000;
 export const CAMPAIGN_SEND_BATCH = 50;
 /** Parallel WhatsApp sends within a batch (keeps well under Cloud API throughput limits). */
 const SEND_CONCURRENCY = 5;
+/** Failure reason when the audience matched no invitation at dispatch time. */
+export const NO_AUDIENCE_REASON =
+  "No guests matched this campaign's audience (check the event, the segment filter such as 'not yet invited', and the guest selection)";
 /** Transient send failures allowed per recipient before it is marked failed. */
 const MAX_RECIPIENT_SEND_ATTEMPTS = 3;
 
@@ -86,6 +90,8 @@ async function toCampaignDtos(organizationId: string, campaigns: CampaignDoc[]) 
         sessionIds: (c.targetSegment?.sessionIds ?? []).map(String),
         groupIds: (c.targetSegment?.groupIds ?? []).map(String),
         onlyUninvited: c.targetSegment?.onlyUninvited ?? undefined,
+        /** Number of explicitly selected guests (the ids themselves are returned by GET /campaigns/:id). */
+        selectedGuestCount: c.targetSegment?.eventGuestIds?.length ?? 0,
       },
       media: c.media?.fileId
         ? { id: String(c.media.fileId), type: c.media.type, mimeType: c.media.mimeType, size: c.media.size, filename: c.media.filename ?? undefined }
@@ -93,6 +99,8 @@ async function toCampaignDtos(organizationId: string, campaigns: CampaignDoc[]) 
       scheduledFor: c.scheduledFor?.toISOString(),
       startedAt: c.startedAt?.toISOString(),
       completedAt: c.completedAt?.toISOString(),
+      /** Unset while a running campaign's dispatch job has not yet built the recipient list. */
+      recipientsBuiltAt: c.recipientsBuiltAt?.toISOString(),
       metrics: { ...m, totalTargeted: Math.max(m.totalTargeted, c.totalTargeted ?? 0) },
       failureReason: c.failureReason ?? undefined,
       createdAt: (c.get("createdAt") as Date).toISOString(),
@@ -121,14 +129,26 @@ export async function listCampaigns(organizationId: string, filters: { eventId?:
 }
 
 export async function getCampaign(organizationId: string, campaignId: string) {
-  const [dto] = await toCampaignDtos(organizationId, [await findCampaignOrThrow(organizationId, campaignId)]);
-  return dto;
+  const campaign = await findCampaignOrThrow(organizationId, campaignId);
+  const [dto] = await toCampaignDtos(organizationId, [campaign]);
+  const eventGuestIds = campaign.targetSegment?.eventGuestIds;
+  return eventGuestIds?.length ? { ...dto, targetSegment: { ...dto.targetSegment, eventGuestIds: eventGuestIds.map(String) } } : dto;
 }
 
-async function validateSegment(organizationId: string, eventId: string, segment: CreateCampaignInput["targetSegment"]) {
+async function validateSegment(organizationId: string, eventId: string, segment: TargetSegmentInput) {
   if (segment.sessionIds?.length) {
     const n = await EventSession.countDocuments({ organizationId, eventId, _id: { $in: segment.sessionIds } });
     if (n !== new Set(segment.sessionIds).size) throw Errors.validation("Unknown session in segment", { "targetSegment.sessionIds": ["Unknown session"] });
+  }
+  if (segment.eventGuestIds?.length) {
+    // Every selected guest must be an invitation to this event in this organization.
+    const n = await EventGuest.countDocuments({ organizationId, eventId, _id: { $in: segment.eventGuestIds } });
+    const unknown = segment.eventGuestIds.length - n;
+    if (unknown > 0) {
+      throw Errors.validation(`${unknown} selected guest${unknown === 1 ? " is" : "s are"} not invited to this event`, {
+        "targetSegment.eventGuestIds": ["Every selected guest must belong to the campaign's event"],
+      });
+    }
   }
 }
 
@@ -184,7 +204,14 @@ export async function createCampaign(actor: ActorContext, input: CreateCampaignI
     resourceType: "campaign",
     resourceId: campaign.id,
     details: `${status === "running" ? "Launched" : status === "scheduled" ? "Scheduled" : "Created"} campaign "${campaign.name}"`,
-    metadata: { status, scheduledFor: input.scheduledFor, templateName: template.name, eventId: event.id, mediaType: media?.type },
+    metadata: {
+      status,
+      scheduledFor: input.scheduledFor,
+      templateName: template.name,
+      eventId: event.id,
+      mediaType: media?.type,
+      selectedGuestCount: input.targetSegment.eventGuestIds?.length,
+    },
   });
   return getCampaign(actor.organizationId, campaign.id);
 }
@@ -261,7 +288,7 @@ export async function resumeCampaign(actor: ActorContext, campaignId: string) {
     { _id: campaignId, organizationId: actor.organizationId, status: "paused" },
     {
       $set: { status: stillScheduled ? "scheduled" : "running", ...(stillScheduled ? {} : { startedAt: current.startedAt ?? new Date() }) },
-      $unset: { pausedAt: 1 },
+      $unset: { pausedAt: 1, failureReason: 1 },
       $inc: { dispatchGeneration: 1 },
     },
     { new: true }
@@ -325,6 +352,9 @@ export async function listRecipients(organizationId: string, campaignId: string,
       sentAt: r.sentAt?.toISOString(),
       deliveredAt: r.deliveredAt?.toISOString(),
       readAt: r.readAt?.toISOString(),
+      failedAt: r.failedAt?.toISOString(),
+      errorCode: r.errorCode ?? undefined,
+      suppressionReason: r.suppressionReason ?? undefined,
       errorMessage: r.errorMessage ?? r.suppressionReason ?? undefined,
     })),
     total,
@@ -408,19 +438,79 @@ export async function sendDraftTestMessage(actor: ActorContext, input: { eventId
 // Background side (campaign.dispatch job)
 // ---------------------------------------------------------------------------
 
-function segmentQuery(campaign: CampaignDoc): Record<string, unknown> {
-  const s: Partial<NonNullable<CampaignDoc["targetSegment"]>> = campaign.targetSegment ?? {};
+type SegmentFilter = {
+  category?: string | null;
+  rsvpStatus?: string | null;
+  onlyVip?: boolean | null;
+  sessionIds?: Array<string | Types.ObjectId> | null;
+  groupIds?: Array<string | Types.ObjectId> | null;
+  onlyUninvited?: boolean | null;
+  eventGuestIds?: Array<string | Types.ObjectId> | null;
+};
+
+/**
+ * EventGuest filter for a campaign audience. An explicit selection (eventGuestIds) is one
+ * more condition, so every other filter and the cancelled-invitation rule still apply.
+ * Values are ObjectIds so the filter also works in aggregations.
+ */
+function segmentQuery(organizationId: string | Types.ObjectId, eventId: string | Types.ObjectId, s: SegmentFilter = {}): Record<string, unknown> {
   const query: Record<string, unknown> = {
-    organizationId: campaign.organizationId,
-    eventId: campaign.eventId,
+    organizationId: toObjectId(organizationId),
+    eventId: toObjectId(eventId),
     rsvpStatus: s.rsvpStatus ?? { $ne: "cancelled" },
   };
   if (s.category) query.category = s.category;
   if (s.onlyVip) query.isVip = true;
-  if (s.sessionIds?.length) query.invitedSessionIds = { $in: s.sessionIds };
-  if (s.groupIds?.length) query.groupId = { $in: s.groupIds };
+  if (s.sessionIds?.length) query.invitedSessionIds = { $in: s.sessionIds.map(toObjectId) };
+  if (s.groupIds?.length) query.groupId = { $in: s.groupIds.map(toObjectId) };
   if (s.onlyUninvited) query.invitedAt = { $exists: false };
+  if (s.eventGuestIds?.length) query._id = { $in: s.eventGuestIds.map(toObjectId) };
   return query;
+}
+
+/**
+ * Who a segment reaches, before anything is sent: matched invitations, and how many of them
+ * the consent rules would suppress (the same rules the dispatch job applies).
+ */
+export async function previewAudience(organizationId: string, input: { eventId: string; targetSegment: TargetSegmentInput }) {
+  await findEventOrThrow(organizationId, input.eventId);
+  await validateSegment(organizationId, input.eventId, input.targetSegment);
+  const rows = await EventGuest.aggregate<{ _id: string | null; n: number }>([
+    { $match: segmentQuery(organizationId, input.eventId, input.targetSegment) },
+    { $lookup: { from: Guest.collection.name, localField: "guestId", foreignField: "_id", as: "contact" } },
+    { $unwind: { path: "$contact", preserveNullAndEmptyArrays: true } },
+    {
+      $group: {
+        _id: {
+          $switch: {
+            branches: [
+              { case: { $eq: [{ $ifNull: ["$contact._id", null] }, null] }, then: "contact_missing" },
+              { case: { $eq: ["$contact.optedOut", true] }, then: "opted_out" },
+              { case: { $eq: ["$contact.communicationSuppressed", true] }, then: "suppressed" },
+              { case: { $eq: ["$contact.mobileValid", false] }, then: "invalid_mobile" },
+            ],
+            default: null,
+          },
+        },
+        n: { $sum: 1 },
+      },
+    },
+  ]);
+  const suppressed: Record<string, number> = {};
+  let matched = 0;
+  let eligible = 0;
+  for (const row of rows) {
+    matched += row.n;
+    if (row._id) suppressed[row._id] = row.n;
+    else eligible += row.n;
+  }
+  return {
+    matched,
+    eligible,
+    suppressed,
+    // Selected guests the other filters exclude (for example a cancelled invitation).
+    selectedNotMatched: input.targetSegment.eventGuestIds ? input.targetSegment.eventGuestIds.length - matched : 0,
+  };
 }
 
 async function currentCampaign(organizationId: string, campaignId: string, generation: number) {
@@ -461,16 +551,20 @@ export async function dispatchCampaign(
     return { skipped: "event_cancelled" };
   }
   const template = await Template.findOne({ _id: campaign.templateId, organizationId: data.organizationId });
-  if (!template || template.approvalStatus !== "APPROVED") {
-    await Campaign.updateOne({ _id: campaign._id, organizationId: data.organizationId }, { $set: { status: "failed", failureReason: "Template is no longer approved" } });
+  const templateProblem = templateSendProblem(template);
+  if (templateProblem) {
+    await Campaign.updateOne({ _id: campaign._id, organizationId: data.organizationId }, { $set: { status: "failed", failureReason: templateProblem.slice(0, 500) } });
     return { skipped: "template_not_approved" };
   }
 
   if (!campaign.recipientsBuiltAt) {
     let lastId: unknown = null;
     let total = 0;
+    const audience = segmentQuery(data.organizationId, campaign.eventId, campaign.targetSegment ?? {});
+    const selection = audience._id as Record<string, unknown> | undefined;
     for (;;) {
-      const batch = await EventGuest.find({ ...segmentQuery(campaign), ...(lastId ? { _id: { $gt: lastId } } : {}) })
+      // Keyset pagination on _id, merged with (never replacing) an explicit guest selection.
+      const batch = await EventGuest.find({ ...audience, ...(lastId ? { _id: { ...selection, $gt: lastId } } : {}) })
         .sort({ _id: 1 })
         .limit(RECIPIENT_BATCH);
       if (batch.length === 0) break;
@@ -502,6 +596,22 @@ export async function dispatchCampaign(
       }
       total += batch.length;
     }
+    if (total === 0) {
+      // Nothing matched: say so instead of finishing as an empty "completed" campaign.
+      await Campaign.updateOne(
+        { _id: campaign._id, organizationId: data.organizationId, status: "running" },
+        {
+          $set: {
+            status: "failed",
+            recipientsBuiltAt: new Date(),
+            totalTargeted: 0,
+            completedAt: new Date(),
+            failureReason: NO_AUDIENCE_REASON,
+          },
+        }
+      );
+      return { skipped: "no_matching_guests" };
+    }
     await Campaign.updateOne({ _id: campaign._id, organizationId: data.organizationId }, { $set: { recipientsBuiltAt: new Date(), totalTargeted: total } });
   }
 
@@ -516,6 +626,10 @@ export async function dispatchCampaign(
   try {
     await ensureWhatsAppMedia(campaign, await phoneNumberIdFor(data.organizationId));
   } catch (err) {
+    if (err instanceof WhatsAppSendError && err.accountLevel) {
+      await pauseForAccountProblem(data.organizationId, campaign.id, err);
+      return { skipped: "whatsapp_account_error" };
+    }
     if (err instanceof WhatsAppSendError && err.permanent) {
       await Campaign.updateOne(
         { _id: campaign._id, organizationId: data.organizationId },
@@ -550,6 +664,36 @@ export async function dispatchCampaign(
   const done = await completeCampaignIfDone(data.organizationId, campaign.id);
   const remaining = !done && (await CampaignRecipient.exists({ organizationId: data.organizationId, campaignId: campaign._id, status: "pending" })) !== null;
   return { sent, remaining, transientFailures };
+}
+
+/**
+ * The WhatsApp account itself rejected a send (invalid token, unregistered number, blocked or
+ * unpaid account). Every further send would fail the same way, so the campaign is paused with
+ * the reason; unsent guests stay pending and "Resume" continues once the account is fixed.
+ */
+async function pauseForAccountProblem(organizationId: string, campaignId: string, err: WhatsAppSendError) {
+  const paused = await Campaign.findOneAndUpdate(
+    { _id: campaignId, organizationId, status: "running" },
+    {
+      $set: {
+        status: "paused",
+        pausedAt: new Date(),
+        failureReason: `Paused: WhatsApp rejected the sending account (${err.message}). Fix the WhatsApp configuration, then resume.`.slice(0, 500),
+      },
+      $inc: { dispatchGeneration: 1 },
+    },
+    { new: true }
+  );
+  if (paused) {
+    logger.error({ campaignId, code: err.code, err: err.message }, "Campaign paused: WhatsApp account error");
+    await recordAudit(systemActor(organizationId, "campaign-scheduler"), {
+      action: "campaign.paused",
+      resourceType: "campaign",
+      resourceId: campaignId,
+      details: `Campaign "${paused.name}" paused: WhatsApp account error ${err.code ?? ""}`.trim(),
+      metadata: { code: err.code, message: err.message.slice(0, 300) },
+    });
+  }
 }
 
 export async function completeCampaignIfDone(organizationId: string, campaignId: string) {
@@ -606,7 +750,7 @@ export async function sendCampaignRecipient(data: { organizationId: string; camp
             ? "invitation_cancelled"
             : !event || event.status === "cancelled"
               ? "event_cancelled"
-              : !template || template.approvalStatus !== "APPROVED"
+              : templateSendProblem(template)
                 ? "template_not_approved"
                 : null;
   if (blockReason) {
@@ -641,14 +785,18 @@ export async function sendCampaignRecipient(data: { organizationId: string; camp
     );
     await EventGuest.updateOne({ _id: invitation!._id, organizationId: data.organizationId, invitedAt: { $exists: false } }, { $set: { invitedAt: new Date() } });
   } catch (err) {
+    if (err instanceof WhatsAppSendError && err.accountLevel) {
+      // Not this guest's fault: keep them pending (unclaimed, no attempt counted) and stop the campaign.
+      await CampaignRecipient.updateOne({ _id: recipient._id, organizationId: data.organizationId }, { $unset: { claimedAt: 1 } });
+      await pauseForAccountProblem(data.organizationId, campaign.id, err);
+      return { skipped: "whatsapp_account_error" };
+    }
     if (err instanceof WhatsAppSendError && err.permanent) {
       await CampaignRecipient.updateOne(
         { _id: recipient._id, organizationId: data.organizationId },
         { $set: { status: "failed", failedAt: new Date(), errorCode: err.code, errorMessage: err.message.slice(0, 500) } }
       );
-      if (err.code !== undefined && INVALID_RECIPIENT_CODES.has(err.code)) {
-        await markMobileInvalid(systemActor(data.organizationId, "campaign-scheduler"), contact!, `WhatsApp error ${err.code}`);
-      }
+      await applyPermanentSendFailure(systemActor(data.organizationId, "campaign-scheduler"), contact!, err.code);
     } else if ((recipient.sendAttempts ?? 0) + 1 >= MAX_RECIPIENT_SEND_ATTEMPTS) {
       await CampaignRecipient.updateOne(
         { _id: recipient._id, organizationId: data.organizationId },

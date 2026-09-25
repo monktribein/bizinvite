@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useAuth } from "@/lib/auth/context";
 import { useEvents } from "@/hooks/useEvents";
 import { getRoleDisplayName } from "@/lib/auth/permissions";
+import { WhatsAppIndicator } from "./WhatsAppIndicator";
 import {
   Menu,
   Building2,
@@ -12,7 +13,6 @@ import {
   LogOut,
   ChevronDown,
   ShieldCheck,
-  CheckCircle2,
 } from "lucide-react";
 
 interface HeaderProps {
@@ -87,11 +87,7 @@ export function Header({ onOpenMobileSidebar }: HeaderProps) {
       {/* Right: WhatsApp Health, User Menu */}
       <div className="flex items-center gap-3">
         {/* WhatsApp Channel Indicator */}
-        <div className="hidden md:flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 border border-emerald-200 text-xs font-medium text-emerald-800">
-          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-          <span>WA: Active</span>
-          <span className="text-[10px] text-emerald-600">Tier 100K</span>
-        </div>
+        <WhatsAppIndicator variant="pill" />
 
         {/* User Profile Dropdown */}
         <div className="relative">

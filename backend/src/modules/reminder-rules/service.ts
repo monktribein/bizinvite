@@ -11,15 +11,15 @@ import { recordAudit } from "../audit";
 import { PLAN_CATALOGUE } from "../billing/service";
 import { sendTemplateToGuest } from "../conversations/messaging.service";
 import { Message } from "../conversations/model";
-import { INVALID_RECIPIENT_CODES, WhatsAppSendError } from "../conversations/whatsapp.client";
+import { WhatsAppSendError } from "../conversations/whatsapp.client";
 import { Event, EventDoc } from "../events/model";
-import { markMobileInvalid } from "../guests/consent.service";
+import { applyPermanentSendFailure } from "../guests/consent.service";
 import { EventGuest, Guest } from "../guests/model";
 import { Organization } from "../organizations/model";
 import { EventSession } from "../sessions/model";
 import { buildVariableContext } from "../templates/context";
 import { Template } from "../templates/model";
-import { assertTemplateSendable, findTemplateOrThrow } from "../templates/service";
+import { assertTemplateSendable, findTemplateOrThrow, templateSendProblem } from "../templates/service";
 import { ReminderRule, ReminderRuleDoc } from "./model";
 import type { CreateRuleInput, UpdateRuleInput } from "./schema";
 import { computeFirstRunAt, defaultTargetStatuses, evaluateStopConditions, nextDueAttempt, StopReason } from "./stop-conditions";
@@ -352,7 +352,8 @@ export async function processReminderSend(job: ScheduledJobDoc, now = new Date()
   }
 
   const template = await Template.findOne({ _id: rule!.templateId, organizationId });
-  if (!template || template.approvalStatus !== "APPROVED") return failed("Template is not approved");
+  const templateProblem = templateSendProblem(template);
+  if (!template || templateProblem) return failed(templateProblem ?? "Template not found");
 
   const org = await Organization.findById(organizationId).select("name");
 
@@ -392,8 +393,8 @@ export async function processReminderSend(job: ScheduledJobDoc, now = new Date()
       throw err;
     }
     await EventGuest.updateOne({ _id: invitation!._id, organizationId }, { $set: { reminderStatus: "failed" } });
-    if (err instanceof WhatsAppSendError && err.permanent && err.code !== undefined && INVALID_RECIPIENT_CODES.has(err.code)) {
-      await markMobileInvalid(systemActor(organizationId, "reminder-scheduler"), contact!, `WhatsApp error ${err.code}`);
+    if (err instanceof WhatsAppSendError && err.permanent) {
+      await applyPermanentSendFailure(systemActor(organizationId, "reminder-scheduler"), contact!, err.code);
     }
     return failed((err as Error).message, { executedAt: now });
   }

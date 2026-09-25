@@ -15,7 +15,12 @@ const updateMappingSchema = z
   .object({
     variables: z.array(z.enum(SUPPORTED_VARIABLES)).max(20),
     buttonPayloads: z.array(z.enum(QUICK_REPLY_ACTIONS).nullable()).max(10),
-    headerMediaUrl: z.string().url().max(1000),
+    /** Public https link used as the IMAGE/VIDEO/DOCUMENT header when a message has no attachment; null clears it. */
+    headerMediaUrl: z.string().url().max(1000).refine((u) => u.startsWith("https://"), "Must be an https link Meta can download").nullable(),
+    /** Business field for a TEXT header placeholder; null clears it. */
+    headerVariable: z.enum(SUPPORTED_VARIABLES).nullable(),
+    /** Business field per button (index-aligned) for dynamic URL buttons. */
+    buttonUrlVariables: z.array(z.enum(SUPPORTED_VARIABLES).nullable()).max(10),
   })
   .partial();
 

@@ -30,6 +30,10 @@ export interface Guest {
   assignedRelationshipManager?: string;
   consentSource: "csv_import" | "manual_entry" | "whatsapp_opt_in" | "external_form";
   consentTimestamp: string;
+  /** Communication state of the contact; the server never messages blocked contacts. */
+  optedOut?: boolean;
+  communicationSuppressed?: boolean;
+  mobileValid?: boolean;
   rsvpStatus: RSVPStatus;
   rsvpResponseTime?: string;
   reminderStatus: ReminderStatus;

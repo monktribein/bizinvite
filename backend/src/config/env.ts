@@ -71,24 +71,51 @@ const envSchema = z
     /** Public URL of this API, used for links sent to guests (pass QR images). Optional. */
     PUBLIC_BASE_URL: optionalString,
 
+    /**
+     * Comma-separated DNS resolvers for Node (e.g. "8.8.8.8,1.1.1.1"). Optional; only needed where Node's
+     * resolver cannot resolve the mongodb+srv SRV record (querySrv ECONNREFUSED on some Windows machines).
+     */
+    DNS_SERVERS: optionalString,
+
     LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
   })
   .superRefine((env, ctx) => {
     if (env.JWT_ACCESS_SECRET === env.JWT_REFRESH_SECRET) {
       ctx.addIssue({ code: "custom", path: ["JWT_REFRESH_SECRET"], message: "Must differ from JWT_ACCESS_SECRET" });
     }
-    if (env.NODE_ENV === "production" && process.env.REQUIRE_WHATSAPP === "true") {
-      for (const key of [
-        "WHATSAPP_ACCESS_TOKEN",
-        "WHATSAPP_PHONE_NUMBER_ID",
-        "WHATSAPP_BUSINESS_ACCOUNT_ID",
-        "WHATSAPP_WEBHOOK_VERIFY_TOKEN",
-        "WHATSAPP_APP_SECRET",
-      ] as const) {
-        if (!env[key]) ctx.addIssue({ code: "custom", path: [key], message: `${key} is required when REQUIRE_WHATSAPP=true` });
-      }
+    for (const issue of whatsappEnvIssues(env, process.env.REQUIRE_WHATSAPP === "true")) {
+      ctx.addIssue({ code: "custom", path: [issue.key], message: issue.message });
     }
   });
+
+const WHATSAPP_KEYS = [
+  "WHATSAPP_ACCESS_TOKEN",
+  "WHATSAPP_PHONE_NUMBER_ID",
+  "WHATSAPP_BUSINESS_ACCOUNT_ID",
+  "WHATSAPP_WEBHOOK_VERIFY_TOKEN",
+  "WHATSAPP_APP_SECRET",
+] as const;
+type WhatsAppEnvKey = (typeof WHATSAPP_KEYS)[number];
+
+/**
+ * WhatsApp settings that are missing for the process to start.
+ *
+ * Production has two valid shapes:
+ * - dry-run: no WHATSAPP_ACCESS_TOKEN, nothing is sent (allowed unless REQUIRE_WHATSAPP=true);
+ * - live: WHATSAPP_ACCESS_TOKEN set, which then requires every other value. Without the verify
+ *   token Meta cannot subscribe to webhooks, and without the app secret every webhook is
+ *   rejected, so delivery/read statuses and RSVP replies would silently never arrive.
+ */
+export function whatsappEnvIssues(
+  env: Pick<Env, "NODE_ENV" | WhatsAppEnvKey>,
+  requireWhatsApp = false
+): Array<{ key: WhatsAppEnvKey; message: string }> {
+  if (env.NODE_ENV !== "production") return [];
+  const live = Boolean(env.WHATSAPP_ACCESS_TOKEN);
+  if (!live && !requireWhatsApp) return [];
+  const reason = requireWhatsApp && !live ? "when REQUIRE_WHATSAPP=true" : "in production when WHATSAPP_ACCESS_TOKEN is set (live sending)";
+  return WHATSAPP_KEYS.filter((key) => !env[key]).map((key) => ({ key, message: `${key} is required ${reason}` }));
+}
 
 export type Env = z.infer<typeof envSchema>;
 

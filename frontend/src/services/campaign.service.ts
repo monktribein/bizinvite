@@ -2,11 +2,17 @@ import { apiClient } from "@/lib/api/client";
 import { mockAdapter } from "@/lib/api/mock-adapter";
 import { isMockEnabled } from "./config";
 import {
+  AudiencePreview,
   Campaign,
   CampaignMedia,
+  CampaignRecipient,
+  CampaignRecipientPage,
+  CampaignTargetSegment,
   CreateCampaignInput,
+  RecipientStatus,
   CreateLocalTemplateInput,
   TemplateCapabilities,
+  TemplateMappingInput,
   WhatsAppTemplate,
 } from "@/types/campaign";
 
@@ -32,6 +38,15 @@ export const campaignService = {
       throw new Error("Templates cannot be created in mock mode.");
     }
     const response = await apiClient.post<WhatsAppTemplate>("/api/v1/templates", input);
+    return response.data;
+  },
+
+  /** Binds template placeholders (body, header, dynamic URL buttons) to BizInvite fields. */
+  async updateTemplateMapping(templateId: string, mapping: TemplateMappingInput): Promise<WhatsAppTemplate> {
+    if (isMockEnabled()) {
+      throw new Error("Template mapping is not available in mock mode.");
+    }
+    const response = await apiClient.patch<WhatsAppTemplate>(`/api/v1/templates/${templateId}`, mapping);
     return response.data;
   },
 
@@ -107,6 +122,48 @@ export const campaignService = {
       return mockAdapter.resumeCampaign(campaignId);
     }
     const response = await apiClient.post<Campaign>(`/api/v1/campaigns/${campaignId}/resume`);
+    return response.data;
+  },
+
+  /** Starts a draft or scheduled campaign now. */
+  async sendCampaign(campaignId: string): Promise<Campaign> {
+    if (isMockEnabled()) {
+      return mockAdapter.sendCampaign(campaignId);
+    }
+    const response = await apiClient.post<Campaign>(`/api/v1/campaigns/${campaignId}/send`);
+    return response.data;
+  },
+
+  /** Cancels a draft, scheduled, running or paused campaign; unsent recipients are withdrawn. */
+  async cancelCampaign(campaignId: string): Promise<Campaign> {
+    if (isMockEnabled()) {
+      return mockAdapter.cancelCampaign(campaignId);
+    }
+    const response = await apiClient.post<Campaign>(`/api/v1/campaigns/${campaignId}/cancel`);
+    return response.data;
+  },
+
+  async getCampaignRecipients(
+    campaignId: string,
+    options: { status?: RecipientStatus; page?: number; limit?: number } = {}
+  ): Promise<CampaignRecipientPage> {
+    if (isMockEnabled()) {
+      return mockAdapter.getCampaignRecipients(campaignId, options.status);
+    }
+    const response = await apiClient.get<CampaignRecipient[]>(`/api/v1/campaigns/${campaignId}/recipients`, {
+      status: options.status,
+      page: options.page,
+      limit: options.limit,
+    });
+    return { items: response.data, total: response.meta?.total ?? response.data.length };
+  },
+
+  /** How many guests a segment or selection reaches, and how many consent rules would suppress. */
+  async previewAudience(input: { eventId: string; targetSegment: CampaignTargetSegment }): Promise<AudiencePreview> {
+    if (isMockEnabled()) {
+      return mockAdapter.previewAudience(input.eventId, input.targetSegment);
+    }
+    const response = await apiClient.post<AudiencePreview>("/api/v1/campaigns/audience-preview", input);
     return response.data;
   },
 };
