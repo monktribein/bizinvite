@@ -13,7 +13,7 @@ export function useCheckIn(eventId?: string) {
 
   const scanMutation = useMutation({
     mutationFn: ({ qrData, gateId, paxCount }: { qrData: string; gateId: string; paxCount?: number }) =>
-      checkInService.scanQRCode(qrData, gateId, paxCount),
+      checkInService.scanQRCode(qrData, gateId, paxCount, eventId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["checkin_summary"] });
       queryClient.invalidateQueries({ queryKey: ["guests"] });

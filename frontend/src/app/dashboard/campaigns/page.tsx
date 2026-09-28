@@ -43,6 +43,7 @@ import {
   Ban,
   FileText,
   ListChecks,
+  QrCode,
 } from "lucide-react";
 
 type AudienceMode = "segment" | "selected";
@@ -205,6 +206,8 @@ export default function CampaignsPage() {
 
   // Optional invitation image/video, uploaded as soon as it is picked
   const [campaignMedia, setCampaignMedia] = useState<CampaignMedia | null>(null);
+  // Send each guest's QR entry pass with the invitation (issued by the backend at send time).
+  const [includePass, setIncludePass] = useState(true);
   const [mediaPreview, setMediaPreview] = useState<{ url: string; type: CampaignMediaType; name: string } | null>(null);
   const [isUploadingMedia, setIsUploadingMedia] = useState(false);
   const [mediaError, setMediaError] = useState("");
@@ -274,7 +277,17 @@ export default function CampaignsPage() {
     selectedTemplate.source !== "local" &&
     ["IMAGE", "VIDEO", "DOCUMENT"].includes(selectedTemplate.headerType ?? "") &&
     !campaignMedia &&
-    !selectedTemplate.headerMediaUrl;
+    !selectedTemplate.headerMediaUrl &&
+    !(includePass && selectedTemplate.headerType === "IMAGE");
+
+  // How the QR pass reaches the guest: as the IMAGE header, or as the pass code / link in the text.
+  const qrAsHeader = includePass && selectedTemplate?.headerType === "IMAGE" && !campaignMedia;
+  const passInText =
+    !!selectedTemplate &&
+    [...selectedTemplate.variables, selectedTemplate.headerVariable, ...(selectedTemplate.buttons ?? []).map((b) => b.urlVariable)].some(
+      (f) => f === "pass_code" || f === "pass_url"
+    );
+  const passUndeliverable = includePass && !!selectedTemplate && selectedTemplate.source !== "local" && !qrAsHeader && !passInText;
 
   const [isSubmitting, setIsSubmitting] = useState<"send" | "draft" | null>(null);
 
@@ -300,6 +313,7 @@ export default function CampaignsPage() {
         name: campaignName,
         templateId: selectedTemplate.id,
         mediaId: campaignMedia?.id,
+        includePass,
         draft: draft || undefined,
         scheduledFor: !draft && scheduleChoice === "later" ? new Date(scheduledDateTime).toISOString() : undefined,
         targetSegment,
@@ -435,6 +449,11 @@ export default function CampaignsPage() {
                               <ImageIcon className="w-3.5 h-3.5 text-slate-400" />
                             )}
                             {camp.media.type === "video" ? "Video" : "Image"}: {camp.media.filename || "attachment"} ({formatFileSize(camp.media.size)})
+                          </p>
+                        )}
+                        {camp.includePass && (
+                          <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-1">
+                            <QrCode className="w-3.5 h-3.5 text-slate-400" /> Includes each guest&apos;s QR entry pass
                           </p>
                         )}
                       </div>
@@ -805,6 +824,40 @@ export default function CampaignsPage() {
             )}
           </div>
 
+          {/* QR entry pass */}
+          <div className="rounded-xl border border-slate-200 p-3 bg-white space-y-2">
+            <label className="flex items-start gap-2 cursor-pointer text-xs">
+              <input
+                type="checkbox"
+                checked={includePass}
+                onChange={(e) => setIncludePass(e.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-slate-300 text-indigo-600"
+              />
+              <span>
+                <span className="font-bold text-slate-800 flex items-center gap-1">
+                  <QrCode className="w-3.5 h-3.5 text-indigo-600" /> Include QR entry pass
+                </span>
+                <span className="block text-slate-500 mt-0.5">
+                  Each guest gets their own signed QR pass with this invitation; gate staff scan it on the Check-in page.
+                </span>
+              </span>
+            </label>
+            {includePass && selectedTemplate && (
+              <p className={`text-xs flex items-start gap-1 ${passUndeliverable ? "text-amber-700" : "text-slate-600"}`}>
+                <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                {qrAsHeader
+                  ? "The QR code is sent as the invitation image (this template has an IMAGE header)."
+                  : passInText
+                  ? "The pass code / link is sent in the message text (pass_code / pass_url)."
+                  : selectedTemplate.source === "local"
+                  ? "Dry-run test template: passes are issued, but this template shows no pass field."
+                  : campaignMedia && selectedTemplate.headerType === "IMAGE"
+                  ? "Your attachment uses the image header, and this template has no pass_code / pass_url field: remove the attachment to send the QR as the image."
+                  : "This template cannot carry the QR: pick one approved with an IMAGE header, or map pass_code / pass_url in Map Fields."}
+              </p>
+            )}
+          </div>
+
           {/* Invitation Media (optional) */}
           <div className="rounded-xl border border-slate-200 p-3 bg-white space-y-2">
             <div className="flex flex-wrap items-center justify-between gap-1">
@@ -878,6 +931,12 @@ export default function CampaignsPage() {
                 {mediaPreview?.type === "image" && (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={mediaPreview.url} alt="" className="mb-2 max-h-48 w-full rounded object-cover" />
+                )}
+                {qrAsHeader && (
+                  <div className="mb-2 flex h-32 w-full flex-col items-center justify-center gap-1 rounded bg-slate-100 text-slate-500">
+                    <QrCode className="h-14 w-14" />
+                    <span className="text-[10px] font-semibold">Guest&apos;s personal QR pass</span>
+                  </div>
                 )}
                 {mediaPreview?.type === "video" && (
                   <video src={mediaPreview.url} controls className="mb-2 max-h-48 w-full rounded bg-black" />
@@ -958,7 +1017,7 @@ export default function CampaignsPage() {
               variant="outline"
               size="sm"
               isLoading={isSubmitting === "draft"}
-              disabled={isUploadingMedia || mediaTemplateMismatch || !selectedTemplate || audienceBlocked || isSubmitting !== null}
+              disabled={isUploadingMedia || mediaTemplateMismatch || passUndeliverable || !selectedTemplate || audienceBlocked || isSubmitting !== null}
               onClick={() => void submitCampaign(true)}
             >
               <FileText className="w-3.5 h-3.5 mr-1" /> Save as Draft
@@ -968,7 +1027,7 @@ export default function CampaignsPage() {
                 type="submit"
                 size="sm"
                 isLoading={isSubmitting === "send"}
-                disabled={isUploadingMedia || mediaTemplateMismatch || headerMediaMissing || !selectedTemplate || audienceBlocked || isSubmitting !== null || audience?.eligible === 0}
+                disabled={isUploadingMedia || mediaTemplateMismatch || headerMediaMissing || passUndeliverable || !selectedTemplate || audienceBlocked || isSubmitting !== null || audience?.eligible === 0}
               >
                 <Send className="w-3.5 h-3.5 mr-1" />
                 {scheduleChoice === "now" ? "Send Campaign" : "Schedule Campaign"}

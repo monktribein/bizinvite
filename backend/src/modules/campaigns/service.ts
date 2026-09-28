@@ -15,6 +15,8 @@ import { findEventOrThrow } from "../events/service";
 import { applyPermanentSendFailure } from "../guests/consent.service";
 import { EventGuest, Guest } from "../guests/model";
 import { Organization } from "../organizations/model";
+import { assertTemplateCarriesPass, ensureCurrentPass, passToken, publicQrUrl, SAMPLE_PASS_CODE, sampleQrUrl } from "../passes/service";
+import { Pass } from "../passes/model";
 import { EventSession } from "../sessions/model";
 import { buildVariableContext } from "../templates/context";
 import { Template, TemplateDoc } from "../templates/model";
@@ -64,6 +66,21 @@ async function metricsFor(organizationId: string, campaignIds: string[]): Promis
   return map;
 }
 
+/**
+ * Checks that the template, attachment and QR-pass option make a message Meta accepts.
+ * With includePass and no attachment, the QR image fills an IMAGE header.
+ */
+function assertCampaignContent(template: TemplateDoc, mediaType: CampaignMediaType | undefined, includePass: boolean) {
+  if (includePass) assertTemplateCarriesPass(template, Boolean(mediaType));
+  if (includePass && !mediaType && template.headerType === "IMAGE") return;
+  assertMediaMatchesTemplate(template, mediaType);
+}
+
+/** The QR image fills the template header when the campaign has no attachment of its own. */
+function qrFillsHeader(template: Pick<TemplateDoc, "headerType">, campaign: { includePass?: boolean | null; media?: unknown }) {
+  return Boolean(campaign.includePass) && !campaign.media && template.headerType === "IMAGE";
+}
+
 /** Frontend `Campaign` shape. */
 async function toCampaignDtos(organizationId: string, campaigns: CampaignDoc[]) {
   const ids = campaigns.map((c) => c.id as string);
@@ -96,6 +113,7 @@ async function toCampaignDtos(organizationId: string, campaigns: CampaignDoc[]) 
       media: c.media?.fileId
         ? { id: String(c.media.fileId), type: c.media.type, mimeType: c.media.mimeType, size: c.media.size, filename: c.media.filename ?? undefined }
         : undefined,
+      includePass: c.includePass ?? false,
       scheduledFor: c.scheduledFor?.toISOString(),
       startedAt: c.startedAt?.toISOString(),
       completedAt: c.completedAt?.toISOString(),
@@ -180,7 +198,7 @@ export async function createCampaign(actor: ActorContext, input: CreateCampaignI
   assertTemplateSendable(template);
   await validateSegment(actor.organizationId, input.eventId, input.targetSegment);
   const media = input.mediaId ? await resolveCampaignMedia(actor.organizationId, input.mediaId) : undefined;
-  assertMediaMatchesTemplate(template, media?.type);
+  assertCampaignContent(template, media?.type, input.includePass);
 
   const scheduled = input.scheduledFor && input.scheduledFor.getTime() > Date.now();
   const status = input.draft ? "draft" : scheduled ? "scheduled" : "running";
@@ -193,6 +211,7 @@ export async function createCampaign(actor: ActorContext, input: CreateCampaignI
     status,
     targetSegment: input.targetSegment,
     media,
+    includePass: input.includePass,
     scheduledFor: input.scheduledFor,
     startedAt: status === "running" ? new Date() : undefined,
     createdBy: actor.userId,
@@ -210,6 +229,7 @@ export async function createCampaign(actor: ActorContext, input: CreateCampaignI
       templateName: template.name,
       eventId: event.id,
       mediaType: media?.type,
+      includePass: input.includePass,
       selectedGuestCount: input.targetSegment.eventGuestIds?.length,
     },
   });
@@ -228,9 +248,10 @@ export async function updateCampaign(actor: ActorContext, campaignId: string, ch
   if (changes.mediaId !== undefined) {
     campaign.set("media", changes.mediaId ? await resolveCampaignMedia(actor.organizationId, changes.mediaId) : undefined);
   }
-  if (changes.templateId || changes.mediaId !== undefined) {
+  if (changes.includePass !== undefined) campaign.includePass = changes.includePass;
+  if (changes.templateId || changes.mediaId !== undefined || changes.includePass !== undefined) {
     const template = await findTemplateOrThrow(actor.organizationId, String(campaign.templateId));
-    assertMediaMatchesTemplate(template, campaign.media?.type as CampaignMediaType | undefined);
+    assertCampaignContent(template, campaign.media?.type as CampaignMediaType | undefined, campaign.includePass ?? false);
   }
   if (changes.targetSegment) {
     await validateSegment(actor.organizationId, String(campaign.eventId), changes.targetSegment);
@@ -255,7 +276,7 @@ export async function sendCampaign(actor: ActorContext, campaignId: string) {
   if (!["draft", "scheduled"].includes(campaign.status)) throw Errors.conflict(`A ${campaign.status} campaign cannot be sent`);
   const template = await findTemplateOrThrow(actor.organizationId, String(campaign.templateId));
   assertTemplateSendable(template);
-  assertMediaMatchesTemplate(template, campaign.media?.type as CampaignMediaType | undefined);
+  assertCampaignContent(template, campaign.media?.type as CampaignMediaType | undefined, campaign.includePass ?? false);
   campaign.dispatchGeneration += 1;
   campaign.scheduledFor = undefined;
   campaign.status = "running";
@@ -370,6 +391,8 @@ async function sendTestTemplate(
     rawMobile: string;
     headerMediaFor: (phoneNumberId: string | undefined) => Promise<{ type: CampaignMediaType; id: string } | undefined>;
     campaignId?: CampaignDoc["_id"];
+    /** Fill pass fields (and a QR image header) with a sample pass. */
+    includePass?: boolean;
   }
 ) {
   assertTemplateSendable(input.template);
@@ -379,14 +402,16 @@ async function sendTestTemplate(
   const event = await findEventOrThrow(actor.organizationId, input.eventId);
   try {
     const headerMedia = await input.headerMediaFor(await phoneNumberIdFor(actor.organizationId));
+    const samplePass = input.includePass ? { passCode: SAMPLE_PASS_CODE, url: sampleQrUrl() } : undefined;
     await sendTemplateToGuest({
       organizationId: actor.organizationId,
       mobile: mobile.e164,
       guestName: "Test recipient",
       headerMedia,
+      headerMediaUrl: samplePass && !headerMedia && input.template.headerType === "IMAGE" ? samplePass.url : undefined,
       eventId: event._id,
       template: input.template,
-      context: buildVariableContext({ event, invitation: { name: "Test Guest", allowedCompanions: 1 }, organizationName: org?.name }),
+      context: buildVariableContext({ event, invitation: { name: "Test Guest", allowedCompanions: 1 }, organizationName: org?.name, pass: samplePass }),
       purpose: "test",
       campaignId: input.campaignId,
     });
@@ -401,29 +426,34 @@ async function sendTestTemplate(
 export async function sendTestMessage(actor: ActorContext, campaignId: string, rawMobile: string) {
   const campaign = await findCampaignOrThrow(actor.organizationId, campaignId);
   const template = await findTemplateOrThrow(actor.organizationId, String(campaign.templateId));
-  assertMediaMatchesTemplate(template, campaign.media?.type as CampaignMediaType | undefined);
+  assertCampaignContent(template, campaign.media?.type as CampaignMediaType | undefined, campaign.includePass ?? false);
   const mobile = await sendTestTemplate(actor, {
     eventId: String(campaign.eventId),
     template,
     rawMobile,
     headerMediaFor: (phoneNumberId) => ensureWhatsAppMedia(campaign, phoneNumberId),
     campaignId: campaign._id,
+    includePass: campaign.includePass ?? false,
   });
   await recordAudit(actor, { action: "campaign.test_sent", resourceType: "campaign", resourceId: campaign.id, details: `Sent test message to ${mobile}` });
   return { success: true, message: "Test WhatsApp message sent" };
 }
 
 /** Test send from the campaign form: uses the chosen event, template and attachment before the campaign exists. */
-export async function sendDraftTestMessage(actor: ActorContext, input: { eventId: string; templateId: string; mediaId?: string; mobile: string }) {
+export async function sendDraftTestMessage(
+  actor: ActorContext,
+  input: { eventId: string; templateId: string; mediaId?: string; mobile: string; includePass?: boolean }
+) {
   const template = await findTemplateOrThrow(actor.organizationId, input.templateId);
   const media = input.mediaId ? await resolveCampaignMedia(actor.organizationId, input.mediaId) : undefined;
-  assertMediaMatchesTemplate(template, media?.type);
+  assertCampaignContent(template, media?.type, input.includePass ?? false);
   const mobile = await sendTestTemplate(actor, {
     eventId: input.eventId,
     template,
     rawMobile: input.mobile,
     headerMediaFor: async (phoneNumberId) =>
       input.mediaId ? uploadStoredMediaToWhatsApp(actor.organizationId, input.mediaId, phoneNumberId) : undefined,
+    includePass: input.includePass,
   });
   await recordAudit(actor, {
     action: "campaign.test_sent",
@@ -764,17 +794,33 @@ export async function sendCampaignRecipient(data: { organizationId: string; camp
     : [];
 
   try {
+    // The guest's QR entry pass is issued on first send and reused on later ones.
+    const pass = campaign.includePass ? await ensureCurrentPass(data.organizationId, event!, invitation!) : null;
+    if (campaign.includePass && !pass) {
+      await CampaignRecipient.updateOne({ _id: recipient._id, organizationId: data.organizationId }, { $set: { status: "suppressed", suppressionReason: "pass_not_active" } });
+      await completeCampaignIfDone(data.organizationId, campaign.id);
+      return { skipped: "pass_not_active" };
+    }
+    const passUrl = pass ? publicQrUrl(passToken(pass)) : undefined;
     const headerMedia = await ensureWhatsAppMedia(campaign, await phoneNumberIdFor(data.organizationId));
     const message = await sendTemplateToGuest({
       organizationId: data.organizationId,
       headerMedia,
+      headerMediaUrl: pass && qrFillsHeader(template!, campaign) ? passUrl : undefined,
+      passId: pass?._id,
       mobile: contact!.mobile,
       guestName: contact!.name,
       guestId: contact!._id,
       eventGuestId: invitation!._id,
       eventId: event!._id,
       template: template!,
-      context: buildVariableContext({ event: event!, invitation, organizationName: org?.name, sessionNames: sessions.map((s) => s.name) }),
+      context: buildVariableContext({
+        event: event!,
+        invitation,
+        organizationName: org?.name,
+        sessionNames: sessions.map((s) => s.name),
+        pass: pass ? { passCode: pass.passCode, url: passUrl } : undefined,
+      }),
       purpose: "campaign",
       campaignId: campaign._id,
       campaignRecipientId: recipient._id,
@@ -784,6 +830,9 @@ export async function sendCampaignRecipient(data: { organizationId: string; camp
       { $set: { status: "sent", sentAt: message.sentAt, messageId: message._id, waMessageId: message.waMessageId } }
     );
     await EventGuest.updateOne({ _id: invitation!._id, organizationId: data.organizationId, invitedAt: { $exists: false } }, { $set: { invitedAt: new Date() } });
+    if (pass) {
+      await Pass.updateOne({ _id: pass._id, organizationId: data.organizationId }, { $set: { deliveryStatus: "sent", lastSentAt: message.sentAt ?? new Date() } });
+    }
   } catch (err) {
     if (err instanceof WhatsAppSendError && err.accountLevel) {
       // Not this guest's fault: keep them pending (unclaimed, no attempt counted) and stop the campaign.

@@ -34,12 +34,15 @@ export interface CheckInRecord {
   scannedAt: string;
   executiveName: string;
   status: "admitted" | "duplicate_warning" | "rejected";
+  method?: "qr" | "pass_code" | "manual" | "group";
+  reason?: string;
 }
 
 export interface CheckInResponse {
   success: boolean;
   isDuplicate: boolean;
   message: string;
+  reason?: string;
   guest?: {
     id: string;
     name: string;

@@ -1,11 +1,14 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { DashboardShell } from "@/components/layout/DashboardShell";
+import { QrScanner } from "@/components/check-in/QrScanner";
 import { useCheckIn } from "@/hooks/useCheckIn";
+import { useEventDetail } from "@/hooks/useEvents";
 import { useGuests } from "@/hooks/useGuests";
 import { useAuth } from "@/lib/auth/context";
-import { CheckInResponse } from "@/types/checkin";
+import { isMockEnabled } from "@/services/config";
+import { CheckInRecord, CheckInResponse } from "@/types/checkin";
 import { Guest } from "@/types/guest";
 import { Card, CardHeader, CardContent } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -17,23 +20,59 @@ import {
   Search,
   CheckCircle,
   AlertTriangle,
-  Camera,
   ShieldAlert,
+  Keyboard,
 } from "lucide-react";
+
+/** Same slug the backend derives from a gate name (common/utils/text.ts gateIdFromName). */
+function gateIdFromName(name: string): string {
+  const base = name.replace(/\(.*?\)/g, "").trim().toLowerCase();
+  return base.replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+}
+
+const DEFAULT_GATES = ["Main Gate"];
+
+function scanFailure(err: unknown): CheckInResponse {
+  return {
+    success: false,
+    isDuplicate: false,
+    message: err instanceof Error ? err.message : "Could not verify the pass. Check the connection and try again.",
+  };
+}
+
+function RecentScanIcon({ status }: { status: CheckInRecord["status"] }) {
+  const style =
+    status === "admitted"
+      ? "bg-emerald-100 text-emerald-800"
+      : status === "duplicate_warning"
+      ? "bg-amber-100 text-amber-800"
+      : "bg-rose-100 text-rose-800";
+  return (
+    <div className={`h-6 w-6 rounded-full flex items-center justify-center shrink-0 mt-0.5 font-bold text-[10px] ${style}`}>
+      {status === "admitted" ? "✓" : status === "duplicate_warning" ? "!" : "✕"}
+    </div>
+  );
+}
 
 export default function CheckInPage() {
   const { currentEventId } = useAuth();
   const { summary, scanQR, isScanning, manualCheckIn } =
     useCheckIn(currentEventId);
   const { guests } = useGuests(currentEventId);
+  const { data: event } = useEventDetail(currentEventId);
 
-  const [selectedGate, setSelectedGate] = useState("gate_1");
+  const gateNames = event?.checkInConfig?.activeGates?.length ? event.checkInConfig.activeGates : DEFAULT_GATES;
+  const gates = gateNames.map((name) => ({ id: gateIdFromName(name) || name, name }));
+  const [chosenGate, setChosenGate] = useState("");
+  const selectedGate = gates.some((g) => g.id === chosenGate) ? chosenGate : gates[0].id;
   const [activeTab, setActiveTab] = useState<"camera" | "manual">("camera");
 
-  // Scanner Simulator / Camera Input
+  // QR scanner and typed pass codes
   const [qrInput, setQrInput] = useState("");
   const [paxCount, setPaxCount] = useState(1);
   const [lastResult, setLastResult] = useState<CheckInResponse | null>(null);
+  const verifyingRef = useRef(false);
+  const [isVerifying, setIsVerifying] = useState(false);
 
   // Manual search lookup
   const [manualSearch, setManualSearch] = useState("");
@@ -46,37 +85,41 @@ export default function CheckInPage() {
       )
     : [];
 
+  const verify = async (qrData: string) => {
+    // One verification at a time: the camera keeps decoding while a request is in flight.
+    if (verifyingRef.current) return;
+    verifyingRef.current = true;
+    setIsVerifying(true);
+    try {
+      setLastResult(await scanQR({ qrData, gateId: selectedGate, paxCount }));
+      setPaxCount(1);
+    } catch (err) {
+      setLastResult(scanFailure(err));
+    } finally {
+      verifyingRef.current = false;
+      setIsVerifying(false);
+    }
+  };
+
   const handleScanSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!qrInput.trim()) return;
-
-    const result = await scanQR({
-      qrData: qrInput.trim(),
-      gateId: selectedGate,
-      paxCount,
-    });
-
-    setLastResult(result);
+    await verify(qrInput.trim());
     setQrInput("");
   };
 
-  const handleQuickSimulateScan = async (code: string) => {
-    const result = await scanQR({
-      qrData: code,
-      gateId: selectedGate,
-      paxCount: 1,
-    });
-    setLastResult(result);
-  };
-
   const handlePerformManualCheckIn = async (guest: Guest) => {
-    const result = await manualCheckIn({
-      guestId: guest.id,
-      gateId: selectedGate,
-      paxCount: guest.allowedCompanions + 1,
-    });
-    setLastResult(result);
-    setManualSearch("");
+    try {
+      const result = await manualCheckIn({
+        guestId: guest.id,
+        gateId: selectedGate,
+        paxCount: guest.allowedCompanions + 1,
+      });
+      setLastResult(result);
+      setManualSearch("");
+    } catch (err) {
+      setLastResult(scanFailure(err));
+    }
   };
 
   return (
@@ -102,12 +145,14 @@ export default function CheckInPage() {
           <span className="text-xs font-semibold text-slate-700 whitespace-nowrap">Gate:</span>
           <select
             value={selectedGate}
-            onChange={(e) => setSelectedGate(e.target.value)}
+            onChange={(e) => setChosenGate(e.target.value)}
             className="w-full sm:w-56 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 shadow-2xs focus:ring-2 focus:ring-indigo-600"
           >
-            <option value="gate_1">Gate 1 (Main Entrance)</option>
-            <option value="gate_2">Gate 2 (VIP & Valet Porch)</option>
-            <option value="gate_3">Gate 3 (Ballroom Direct)</option>
+            {gates.map((g) => (
+              <option key={g.id} value={g.id}>
+                {g.name}
+              </option>
+            ))}
           </select>
         </div>
       </div>
@@ -231,72 +276,46 @@ export default function CheckInPage() {
           {activeTab === "camera" && (
             <Card className="overflow-hidden">
               <CardContent className="p-6">
-                {/* Simulated Camera Viewfinder */}
-                <div className="relative mx-auto flex h-60 w-full max-w-sm flex-col items-center justify-center rounded-2xl bg-slate-900 text-white shadow-inner overflow-hidden border-2 border-indigo-500/50">
-                  <div className="absolute inset-x-8 top-1/2 h-0.5 bg-rose-500 shadow-[0_0_8px_#f43f5e] animate-pulse" />
-                  <div className="absolute inset-8 rounded-xl border-2 border-dashed border-white/40 pointer-events-none" />
+                {/* Live camera: each decoded QR is verified and admitted by the backend */}
+                <QrScanner onScan={(data) => void verify(data)} paused={isVerifying} />
 
-                  <Camera className="h-10 w-10 text-white/50 mb-2" />
-                  <span className="text-xs font-semibold text-white/80">
-                    Camera Viewfinder Active
-                  </span>
-                  <span className="text-[10px] text-white/50">
-                    Align guest pass QR inside the frame
-                  </span>
+                <div className="mt-4 flex items-center gap-2">
+                  <div className="w-36">
+                    <Input
+                      label="Pax Entering"
+                      type="number"
+                      min={1}
+                      max={51}
+                      value={paxCount}
+                      onChange={(e) => setPaxCount(Math.max(1, parseInt(e.target.value) || 1))}
+                    />
+                  </div>
+                  <p className="flex-1 pt-5 text-[11px] text-slate-500">
+                    People entering with the next scan (never more than the pass allows). Resets to 1 after each scan.
+                  </p>
                 </div>
 
-                {/* Form to submit scanned QR string or manual PassCode */}
-                <form onSubmit={handleScanSubmit} className="mt-6 space-y-4">
-                  <div className="flex gap-2">
-                    <div className="flex-1">
-                      <Input
-                        label="Pass Code or Scanned QR String"
-                        placeholder="e.g. BIZ-2026-X79K or paste signed token"
-                        value={qrInput}
-                        onChange={(e) => setQrInput(e.target.value)}
-                        required
-                        className="font-mono text-sm"
-                      />
-                    </div>
-                    <div className="w-28">
-                      <Input
-                        label="Pax Entering"
-                        type="number"
-                        min={1}
-                        max={10}
-                        value={paxCount}
-                        onChange={(e) => setPaxCount(parseInt(e.target.value) || 1)}
-                      />
-                    </div>
-                  </div>
-
-                  <Button type="submit" className="w-full" isLoading={isScanning}>
-                    <ScanLine className="w-4 h-4 mr-2" /> Verify & Admit Guest
+                {/* Fallback: pass code typed from the guest's message */}
+                <form onSubmit={handleScanSubmit} className="mt-4 space-y-3 border-t border-slate-100 pt-4">
+                  <Input
+                    label="Or type the pass code"
+                    placeholder="e.g. BIZ-2026-X79K2P"
+                    value={qrInput}
+                    onChange={(e) => setQrInput(e.target.value)}
+                    required
+                    autoCapitalize="characters"
+                    className="font-mono text-sm"
+                  />
+                  <Button type="submit" variant="outline" className="w-full" isLoading={isScanning}>
+                    <Keyboard className="w-4 h-4 mr-2" /> Verify & Admit Guest
                   </Button>
                 </form>
 
-                {/* Quick Simulation Buttons for Easy Demonstration */}
-                <div className="mt-6 pt-4 border-t border-slate-100">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-2">
-                    Quick-Test Live Passes:
-                  </span>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleQuickSimulateScan("BIZ-2026-A12B")}
-                      className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-mono text-indigo-700 hover:bg-indigo-50 font-semibold cursor-pointer"
-                    >
-                      BIZ-2026-A12B (Roy - Active)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleQuickSimulateScan("BIZ-2026-X79K")}
-                      className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs font-mono text-amber-800 hover:bg-amber-100 font-semibold cursor-pointer"
-                    >
-                      BIZ-2026-X79K (Trigger Duplicate)
-                    </button>
-                  </div>
-                </div>
+                {isMockEnabled() && (
+                  <p className="mt-4 text-[11px] text-slate-400">
+                    Mock mode: generate passes on the Passes page, then type a pass code here.
+                  </p>
+                )}
               </CardContent>
             </Card>
           )}
@@ -376,13 +395,13 @@ export default function CheckInPage() {
                 {summary?.recentScans && summary.recentScans.length > 0 ? (
                   summary.recentScans.map((scan) => (
                     <div key={scan.id} className="p-3 text-xs flex items-start gap-2.5">
-                      <div className="h-6 w-6 rounded-full bg-emerald-100 text-emerald-800 flex items-center justify-center shrink-0 mt-0.5 font-bold text-[10px]">
-                        ✓
-                      </div>
+                      <RecentScanIcon status={scan.status} />
                       <div className="flex-1">
                         <div className="flex justify-between items-center">
                           <span className="font-semibold text-slate-900">{scan.guestName}</span>
-                          <span className="font-bold text-slate-700">{scan.paxAdmitted} Pax</span>
+                          <span className="font-bold text-slate-700">
+                            {scan.status === "admitted" ? `${scan.paxAdmitted} Pax` : scan.status === "duplicate_warning" ? "Duplicate" : "Rejected"}
+                          </span>
                         </div>
                         <p className="text-[11px] text-slate-500">{scan.gateName}</p>
                         <span className="text-[10px] text-slate-400">

@@ -7,6 +7,7 @@ import { isDuplicateKeyError } from "../../common/utils/model";
 import { searchRegex } from "../../common/utils/text";
 import type { Pagination } from "../../common/validators/common";
 import { env } from "../../config/env";
+import { isWhatsAppDryRun } from "../../config/whatsapp";
 import { enqueueJob } from "../../scheduler/jobs";
 import { recordAudit } from "../audit";
 import { sendTemplateToGuest } from "../conversations/messaging.service";
@@ -18,7 +19,7 @@ import { communicationBlockReason } from "../guests/service";
 import { EventGuest, EventGuestDoc, Guest } from "../guests/model";
 import { Organization } from "../organizations/model";
 import { buildVariableContext } from "../templates/context";
-import { Template } from "../templates/model";
+import { Template, TemplateDoc } from "../templates/model";
 import { assertTemplateSendable, templateSendProblem } from "../templates/service";
 import { Pass, PassDoc } from "./model";
 import { hashPassToken, PASS_CODE_PATTERN, signPassToken, verifyPassToken } from "./token";
@@ -39,6 +40,58 @@ export function passToken(pass: PassDoc): string {
 
 export function publicQrUrl(token: string): string {
   return `${env.PUBLIC_BASE_URL ?? ""}${env.API_PREFIX}/passes/qr/${token}.png`;
+}
+
+/** File name of the public sample QR used for test sends (it encodes no pass). */
+export const SAMPLE_QR_FILE = "sample.png";
+export const SAMPLE_PASS_CODE = "BIZ-0000-SAMPLE";
+
+export function sampleQrUrl(): string {
+  return `${env.PUBLIC_BASE_URL ?? ""}${env.API_PREFIX}/passes/qr/${SAMPLE_QR_FILE}`;
+}
+
+type PassCarrierTemplate = Pick<TemplateDoc, "name" | "source" | "headerType" | "headerVariable" | "variables" | "buttons">;
+
+/** Business fields that put the pass into a message's text. */
+const PASS_FIELDS = ["pass_code", "pass_url"];
+
+/**
+ * How a template carries a guest's QR pass: as the IMAGE header (the QR itself), or as
+ * a pass code / link in the text. Null when the template cannot carry it.
+ */
+export function passCarrier(template: PassCarrierTemplate, hasCampaignMedia: boolean): "header" | "text" | null {
+  if (template.headerType === "IMAGE" && !hasCampaignMedia) return "header";
+  const fields = [...(template.variables ?? []), template.headerVariable, ...(template.buttons ?? []).map((b) => b.urlVariable)];
+  if (fields.some((f) => f && PASS_FIELDS.includes(f))) return "text";
+  return null;
+}
+
+/** Refuses a campaign that is meant to include the QR pass when its template cannot deliver it. */
+export function assertTemplateCarriesPass(template: PassCarrierTemplate, hasCampaignMedia: boolean) {
+  const carrier = passCarrier(template, hasCampaignMedia);
+  // Local templates only exist in dry-run, where nothing reaches the guest.
+  if (!carrier && template.source !== "local") {
+    throw Errors.validation(
+      `Template "${template.name}" cannot carry the QR pass. Use a template approved with an IMAGE header (the QR is sent as the image, with no campaign attachment), or map {{pass_code}} / {{pass_url}} into its text.`,
+      { includePass: ["Template cannot carry the QR pass"] }
+    );
+  }
+  if (carrier === "header" && !env.PUBLIC_BASE_URL && !isWhatsAppDryRun() && template.source !== "local") {
+    throw Errors.validation("Set PUBLIC_BASE_URL on the backend so WhatsApp can download the QR image", {
+      includePass: ["PUBLIC_BASE_URL is not configured"],
+    });
+  }
+}
+
+/**
+ * The invitation's current pass, issued on first use. Returns null when the organizer
+ * revoked it or it expired: an invitation never silently gets a replacement pass.
+ */
+export async function ensureCurrentPass(organizationId: string, event: EventDoc, invitation: EventGuestDoc): Promise<PassDoc | null> {
+  const current = await Pass.findOne({ organizationId, eventGuestId: invitation._id, isCurrent: true });
+  const pass = current ?? (await issuePass(organizationId, event, invitation));
+  const status = effectiveStatus(pass);
+  return status === "active" || status === "used" ? pass : null;
 }
 
 function effectiveStatus(pass: PassDoc, now = new Date()) {
@@ -222,6 +275,43 @@ export async function queuePassDelivery(actor: ActorContext, passId: string) {
   return { success: true, message: "Pass queued for WhatsApp delivery" };
 }
 
+/** Queues WhatsApp delivery of every active current pass of an event (optionally only never-sent ones). */
+export async function queueEventPassDelivery(actor: ActorContext, input: { eventId: string; onlyUnsent: boolean }) {
+  const event = await findEventOrThrow(actor.organizationId, input.eventId);
+  const templateId = event.communication?.passTemplateId;
+  if (!templateId) throw Errors.validation("Set a pass template on the event before sending passes", { passTemplateId: ["Not configured"] });
+  const template = await Template.findOne({ _id: templateId, organizationId: actor.organizationId });
+  if (!template) throw Errors.notFound("Template");
+  assertTemplateSendable(template);
+
+  const passes = await Pass.find({
+    organizationId: actor.organizationId,
+    eventId: event._id,
+    isCurrent: true,
+    status: "active",
+    expiresAt: { $gte: new Date() },
+    ...(input.onlyUnsent ? { deliveryStatus: { $in: ["not_sent", "failed"] } } : {}),
+  })
+    .limit(20000)
+    .select("_id");
+  const bucket = Math.floor(Date.now() / 60000);
+  for (const pass of passes) {
+    await enqueueJob({
+      type: "whatsapp.send-pass",
+      organizationId: actor.organizationId,
+      payload: { passId: pass.id as string },
+      dedupeKey: `pass-send:${pass.id as string}:${bucket}`,
+    });
+  }
+  await recordAudit(actor, {
+    action: "pass.resent",
+    resourceType: "pass",
+    resourceId: event.id,
+    details: `Queued WhatsApp delivery of ${passes.length} pass(es) for "${event.name}"`,
+  });
+  return { queued: passes.length, message: `${passes.length} pass(es) queued for WhatsApp delivery` };
+}
+
 /** whatsapp.send-pass job. Throws on transient WhatsApp errors so the scheduler retries. */
 export async function sendPass(data: { organizationId: string; passId: string }) {
   const pass = await Pass.findOne({ _id: data.passId, organizationId: data.organizationId });
@@ -309,6 +399,9 @@ export async function passQrPng(organizationId: string, passId: string): Promise
  * beyond the token already in the URL.
  */
 export async function publicPassQrPng(token: string): Promise<Buffer> {
+  if (`${token}.png` === SAMPLE_QR_FILE) {
+    return QRCode.toBuffer(`BizInvite sample pass ${SAMPLE_PASS_CODE}`, { type: "png", width: 512, margin: 2, errorCorrectionLevel: "M" });
+  }
   const check = verifyPassToken(token);
   if (!check.valid) throw Errors.notFound("Pass");
   const pass = await Pass.findOne({ tokenHash: hashPassToken(token) }).setOptions({ skipTenantGuard: true });

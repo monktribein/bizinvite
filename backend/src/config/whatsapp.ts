@@ -29,5 +29,6 @@ export function whatsappStartupWarnings(): string[] {
   const warnings: string[] = [];
   if (!whatsappConfig.appSecret) warnings.push("WHATSAPP_APP_SECRET is not set: webhooks are accepted without signature verification (never allowed in production)");
   if (!whatsappConfig.webhookVerifyToken) warnings.push("WHATSAPP_WEBHOOK_VERIFY_TOKEN is not set: Meta cannot subscribe to delivery and reply webhooks");
+  if (!env.PUBLIC_BASE_URL) warnings.push("PUBLIC_BASE_URL is not set: QR passes cannot be sent as WhatsApp images and pass links are not absolute");
   return warnings;
 }

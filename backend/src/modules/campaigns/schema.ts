@@ -34,6 +34,8 @@ export const createCampaignSchema = z.object({
   targetSegment: targetSegmentSchema,
   /** Image or video uploaded via POST /campaigns/media, sent as the template header. */
   mediaId: objectIdSchema.optional(),
+  /** Issue each guest's QR entry pass and send it with the invitation. */
+  includePass: z.boolean().default(false),
   /**
    * The frontend "launch" flow creates and sends in one call: without scheduledFor the
    * campaign starts immediately. Pass draft=true to only save it.
@@ -49,6 +51,7 @@ export const updateCampaignSchema = z
     targetSegment: targetSegmentSchema,
     /** null removes the attachment. */
     mediaId: objectIdSchema.nullable(),
+    includePass: z.boolean(),
   })
   .partial();
 
@@ -68,6 +71,7 @@ export const draftTestSendSchema = testSendSchema.extend({
   eventId: objectIdSchema,
   templateId: objectIdSchema,
   mediaId: objectIdSchema.optional(),
+  includePass: z.boolean().default(false),
 });
 
 export type CreateCampaignInput = z.infer<typeof createCampaignSchema>;

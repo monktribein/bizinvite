@@ -856,6 +856,73 @@ class MockAdapter {
     return { success: true, message: "Pass re-sent successfully via WhatsApp." };
   }
 
+  async generatePasses(input: { eventId: string; onlyAttending?: boolean; guestIds?: string[] }): Promise<{ created: number; skipped: number }> {
+    await delay(300);
+    const onlyAttending = input.onlyAttending ?? true;
+    const candidates = this.guests.filter(
+      (g) =>
+        g.eventId === input.eventId &&
+        (!onlyAttending || g.rsvpStatus === "attending") &&
+        (!input.guestIds?.length || input.guestIds.includes(g.id))
+    );
+    let created = 0;
+    for (const g of candidates) {
+      if (this.passes.some((p) => p.guestId === g.id && p.status !== "revoked")) continue;
+      this.passes.push(this.mockPass(g));
+      created++;
+    }
+    return { created, skipped: candidates.length - created };
+  }
+
+  async sendAllPasses(eventId: string, onlyUnsent: boolean): Promise<{ queued: number; message: string }> {
+    await delay(200);
+    const targets = this.passes.filter(
+      (p) => p.eventId === eventId && p.status === "active" && (!onlyUnsent || ["not_sent", "failed"].includes(p.deliveryStatus))
+    );
+    for (const p of targets) {
+      p.deliveryStatus = "sent";
+      p.lastSentAt = new Date().toISOString();
+    }
+    return { queued: targets.length, message: `${targets.length} pass(es) queued for WhatsApp delivery` };
+  }
+
+  async reissuePass(id: string): Promise<DigitalPass> {
+    await delay(200);
+    const old = this.passes.find((p) => p.id === id);
+    if (!old) throw new Error("Pass not found");
+    const guest = this.guests.find((g) => g.id === old.guestId);
+    if (!guest) throw new Error("Guest not found");
+    old.status = "revoked";
+    const pass = this.mockPass(guest);
+    this.passes.push(pass);
+    return pass;
+  }
+
+  private mockPass(g: Guest): DigitalPass {
+    const code = Math.random().toString(36).slice(2, 8).toUpperCase();
+    return {
+      id: `pass_${Date.now()}_${code}`,
+      passCode: `BIZ-2026-${code}`,
+      organizationId: g.organizationId,
+      eventId: g.eventId,
+      eventName: this.events.find((e) => e.id === g.eventId)?.name || "Event",
+      guestId: g.id,
+      guestName: g.name,
+      guestMobile: g.mobile,
+      category: g.category,
+      isVip: g.isVip,
+      allowedPax: g.allowedCompanions + 1,
+      admittedPax: g.checkedInCount ?? 0,
+      status: "active",
+      validSessions: [],
+      // Mock mode only: real tokens are signed by the backend.
+      signedToken: `mock.${code}`,
+      qrPayloadUrl: "",
+      deliveryStatus: "not_sent",
+      createdAt: new Date().toISOString(),
+    };
+  }
+
   async revokePass(id: string): Promise<DigitalPass> {
     await delay(200);
     const pass = this.passes.find((p) => p.id === id);

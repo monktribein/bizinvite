@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { passService } from "@/services/pass.service";
+import { GeneratePassesInput } from "@/types/pass";
 
 export function usePasses(eventId?: string) {
   const queryClient = useQueryClient();
@@ -12,6 +13,27 @@ export function usePasses(eventId?: string) {
 
   const resendPassMutation = useMutation({
     mutationFn: (passId: string) => passService.resendPass(passId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["passes"] });
+    },
+  });
+
+  const generatePassesMutation = useMutation({
+    mutationFn: (input: GeneratePassesInput) => passService.generatePasses(input),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["passes"] });
+    },
+  });
+
+  const sendAllPassesMutation = useMutation({
+    mutationFn: (onlyUnsent: boolean) => passService.sendAllPasses(eventId!, onlyUnsent),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["passes"] });
+    },
+  });
+
+  const reissuePassMutation = useMutation({
+    mutationFn: (passId: string) => passService.reissuePass(passId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["passes"] });
     },
@@ -31,5 +53,11 @@ export function usePasses(eventId?: string) {
     isResending: resendPassMutation.isPending,
     revokePass: revokePassMutation.mutateAsync,
     isRevoking: revokePassMutation.isPending,
+    generatePasses: generatePassesMutation.mutateAsync,
+    isGenerating: generatePassesMutation.isPending,
+    sendAllPasses: sendAllPassesMutation.mutateAsync,
+    isSendingAll: sendAllPassesMutation.isPending,
+    reissuePass: reissuePassMutation.mutateAsync,
+    isReissuing: reissuePassMutation.isPending,
   };
 }

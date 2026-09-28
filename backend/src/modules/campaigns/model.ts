@@ -39,6 +39,8 @@ const campaignSchema = new Schema(
       ),
       default: undefined,
     },
+    /** Attach each guest's QR entry pass (issued on send) to the invitation. */
+    includePass: { type: Boolean, default: false },
     scheduledFor: { type: Date },
     startedAt: { type: Date },
     completedAt: { type: Date },

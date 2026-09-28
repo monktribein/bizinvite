@@ -85,6 +85,8 @@ export interface Event {
   faqs?: EventFAQ[];
   sessions: EventSession[];
   checkInConfig: EventCheckInConfig;
+  /** WhatsApp template used by "Send pass" / "Send all passes". */
+  communication?: { passTemplateId?: string | null };
   totalGuestsCount: number;
   confirmedGuestsCount: number;
   createdAt: string;

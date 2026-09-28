@@ -17,6 +17,7 @@ const generateSchema = z.object({
   guestIds: z.array(objectIdSchema).max(5000).optional(),
   onlyAttending: z.boolean().default(true),
 });
+const sendAllSchema = z.object({ eventId: objectIdSchema, onlyUnsent: z.boolean().default(true) });
 const revokeSchema = z.object({ reason: z.string().max(500).optional() });
 const validateSchema = z.object({ qrData: z.string().trim().min(1).max(1024), eventId: objectIdSchema.optional() });
 
@@ -38,6 +39,11 @@ export async function generate(req: Request, res: Response) {
 
 export async function resend(req: Request, res: Response) {
   sendSuccess(req, res, await passService.queuePassDelivery(actorFromRequest(req), parseId(req.params.id, "Pass")));
+}
+
+export async function sendAll(req: Request, res: Response) {
+  const body = sendAllSchema.parse(req.body);
+  sendSuccess(req, res, await passService.queueEventPassDelivery(actorFromRequest(req), body));
 }
 
 export async function revoke(req: Request, res: Response) {

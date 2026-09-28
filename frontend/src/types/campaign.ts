@@ -134,6 +134,8 @@ export interface Campaign {
   status: CampaignStatus;
   targetSegment: CampaignTargetSegment;
   media?: CampaignMedia;
+  /** Each guest's QR entry pass is issued and sent with the invitation. */
+  includePass?: boolean;
   scheduledFor?: string;
   startedAt?: string;
   completedAt?: string;

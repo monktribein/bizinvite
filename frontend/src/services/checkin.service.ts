@@ -4,14 +4,16 @@ import { isMockEnabled } from "./config";
 import { CheckInResponse, CheckInLiveSummary } from "@/types/checkin";
 
 export const checkInService = {
-  async scanQRCode(qrData: string, gateId: string, paxCount = 1): Promise<CheckInResponse> {
+  async scanQRCode(qrData: string, gateId: string, paxCount = 1, eventId?: string): Promise<CheckInResponse> {
     if (isMockEnabled()) {
       return mockAdapter.scanQRCode(qrData, gateId, paxCount);
     }
+    // eventId makes the backend reject passes issued for another event of the organization.
     const response = await apiClient.post<CheckInResponse>("/api/v1/check-ins/scan", {
       qrData,
       gateId,
       paxCount,
+      eventId,
     });
     return response.data;
   },

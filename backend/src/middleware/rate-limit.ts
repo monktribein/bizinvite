@@ -17,9 +17,10 @@ const skipInTests = () => env.NODE_ENV === "test";
  * Meta's webhook deliveries are exempt from the per-IP API limit: a large campaign produces
  * several status events per guest from a few Meta IPs, and a throttled delivery arrives late.
  * They are authenticated by their signature and processed asynchronously instead.
+ * Public pass QR images are fetched by Meta once per invitation, so they have their own limit.
  */
 export function isRateLimitExempt(path: string): boolean {
-  return path.startsWith("/webhooks/");
+  return path.startsWith("/webhooks/") || path.startsWith("/passes/qr/");
 }
 
 /**
@@ -53,6 +54,16 @@ export const authRateLimit = rateLimit({
 export const scanRateLimit = rateLimit({
   windowMs: 60 * 1000,
   limit: 120,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  skip: skipInTests,
+  handler: rateLimitedResponse,
+});
+
+/** Public pass QR images: WhatsApp downloads one per guest when a QR invitation campaign runs. */
+export const qrImageRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 3000,
   standardHeaders: "draft-7",
   legacyHeaders: false,
   skip: skipInTests,
