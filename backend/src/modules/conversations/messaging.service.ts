@@ -6,7 +6,7 @@ import { Organization } from "../organizations/model";
 import type { TemplateDoc } from "../templates/model";
 import { buildTemplateComponents, renderBody, VariableContext } from "../templates/variables";
 import { Conversation, Message, MessageDoc } from "./model";
-import { sendTemplateMessage, WhatsAppSendError } from "./whatsapp.client";
+import { sendSessionMessage, sendTemplateMessage, WhatsAppSendError } from "./whatsapp.client";
 
 type Id = string | Types.ObjectId;
 
@@ -62,6 +62,70 @@ export async function touchConversation(input: {
     },
     { upsert: true, new: true }
   );
+}
+
+/**
+ * Sends a free-form text or image reply (24-hour window only) and records it like any
+ * outbound message. Throws WhatsAppSendError after recording a failure.
+ */
+export async function sendSessionToGuest(input: {
+  organizationId: string;
+  mobile: string;
+  guestName?: string;
+  guestId?: Id;
+  eventGuestId?: Id;
+  eventId?: Id;
+  text: string;
+  /** Public https image; `text` becomes its caption. */
+  imageUrl?: string;
+  purpose: "reply" | "pass";
+  passId?: Id;
+  scheduledJobId?: Id;
+}): Promise<MessageDoc> {
+  const phoneNumberId = await phoneNumberIdFor(input.organizationId);
+  const now = new Date();
+  const conversation = await touchConversation({
+    organizationId: input.organizationId,
+    mobile: input.mobile,
+    guestId: input.guestId,
+    guestName: input.guestName,
+    eventId: input.eventId,
+    direction: "outbound",
+    snippet: input.text,
+    at: now,
+  });
+  const message = await Message.create({
+    organizationId: input.organizationId,
+    conversationId: conversation?._id,
+    direction: "outbound",
+    type: input.imageUrl ? "image" : "text",
+    body: input.text,
+    guestId: input.guestId,
+    eventGuestId: input.eventGuestId,
+    eventId: input.eventId,
+    mobile: input.mobile,
+    phoneNumberId,
+    status: "queued",
+    purpose: input.purpose,
+    passId: input.passId,
+    scheduledJobId: input.scheduledJobId,
+  });
+  try {
+    const result = await sendSessionMessage({
+      phoneNumberId,
+      to: toWhatsAppNumber(input.mobile),
+      ...(input.imageUrl ? { image: { link: input.imageUrl, caption: input.text } } : { text: input.text }),
+    });
+    message.set({ waMessageId: result.waMessageId, status: "sent", sentAt: new Date(), dryRun: result.dryRun });
+    await message.save();
+    if (!result.dryRun) await recordUsage(input.organizationId, USAGE_METRICS.WHATSAPP_MESSAGES);
+    return message;
+  } catch (err) {
+    const sendError = err instanceof WhatsAppSendError ? err : new WhatsAppSendError((err as Error).message, undefined, false);
+    message.set({ status: "failed", failedAt: new Date(), errorCode: sendError.code, errorMessage: sendError.message.slice(0, 500) });
+    await message.save();
+    throw sendError;
+  }
 }
 
 /**

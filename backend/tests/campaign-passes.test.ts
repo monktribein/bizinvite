@@ -70,7 +70,7 @@ describe("QR pass invitations", () => {
       const [pass] = await Pass.find({ organizationId: t.org.id, eventId: event.id });
       expect(await Pass.countDocuments({ organizationId: t.org.id, eventId: event.id })).toBe(1);
       for (const [call] of sendSpy.mock.calls) {
-        const body = call.components.find((c: { type: string }) => c.type === "body") as { parameters: Array<{ text: string }> };
+        const body = call.components.find((c: { type: string }) => c.type === "body") as unknown as { parameters: Array<{ text: string }> };
         expect(body.parameters[1].text).toBe(pass.passCode);
       }
     } finally {

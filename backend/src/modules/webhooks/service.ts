@@ -205,6 +205,15 @@ async function applyInbound(msg: InboundMessage, phoneNumberId?: string): Promis
     } catch (err) {
       return { outcome: `rsvp_rejected: ${(err as Error).message}`, organizationId };
     }
+    // Answer the tap (and send the QR pass on "Yes"). Keyed on the inbound message so a
+    // redelivered webhook never replies twice.
+    await enqueueJob({
+      type: "whatsapp.rsvp-reply",
+      organizationId,
+      payload: { eventGuestId: invitation.id as string, status },
+      dedupeKey: `rsvp-reply:${msg.id}`,
+      maxAttempts: 3,
+    });
     return { outcome: `rsvp_${status}`, organizationId };
   }
   return { outcome: "message_recorded", organizationId };

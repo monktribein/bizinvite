@@ -4,7 +4,7 @@ import { processCampaignDispatch } from "./campaign.processor";
 import { processImport } from "./import.processor";
 import { processReminder, processReminderPlan } from "./reminder.processor";
 import { processReportExport } from "./report.processor";
-import { processSendPass, processWebhook } from "./whatsapp.processor";
+import { processRsvpReply, processSendPass, processWebhook } from "./whatsapp.processor";
 
 /** Job type → processor. Every JobType must have one. */
 export const PROCESSORS: Record<JobType, Processor> = {
@@ -12,6 +12,7 @@ export const PROCESSORS: Record<JobType, Processor> = {
   "reminder.plan": processReminderPlan,
   "reminder.send": processReminder,
   "whatsapp.send-pass": processSendPass,
+  "whatsapp.rsvp-reply": processRsvpReply,
   "whatsapp.process-webhook": processWebhook,
   "import.commit": processImport,
   "report.export": processReportExport,

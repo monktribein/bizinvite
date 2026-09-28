@@ -10,6 +10,8 @@ export const JOB_TYPES = [
   "reminder.send",
   /** Delivers a digital pass over WhatsApp. */
   "whatsapp.send-pass",
+  /** Answers a guest's RSVP button tap (and sends the QR pass on "Yes"). */
+  "whatsapp.rsvp-reply",
   /** Applies one stored inbound WhatsApp webhook event. */
   "whatsapp.process-webhook",
   /** Commits a previewed CSV import that is too large for the HTTP request. */

@@ -136,6 +136,36 @@ export async function sendTemplateMessage(input: {
   return { waMessageId, dryRun: false };
 }
 
+/**
+ * Free-form text or image message. WhatsApp only delivers these inside the 24-hour
+ * customer-service window that opens when the guest messages (or taps a button).
+ */
+export async function sendSessionMessage(input: {
+  phoneNumberId?: string;
+  to: string;
+  text?: string;
+  image?: { link: string; caption?: string };
+}): Promise<{ waMessageId: string; dryRun: boolean }> {
+  if (isWhatsAppDryRun()) {
+    const waMessageId = `dryrun.${randomUUID()}`;
+    logger.info({ kind: input.image ? "image" : "text", waMessageId }, "WhatsApp dry-run: message not sent");
+    return { waMessageId, dryRun: true };
+  }
+  const phoneNumberId = input.phoneNumberId ?? whatsappConfig.phoneNumberId;
+  if (!phoneNumberId) throw new WhatsAppSendError("No WhatsApp sender phone number id is configured", undefined, false, true);
+
+  const content = input.image
+    ? { type: "image", image: { link: input.image.link, ...(input.image.caption ? { caption: input.image.caption.slice(0, 1024) } : {}) } }
+    : { type: "text", text: { body: (input.text ?? "").slice(0, 4096), preview_url: false } };
+  const body = await graphRequest<{ messages?: Array<{ id: string }> }>(`${phoneNumberId}/messages`, {
+    method: "POST",
+    body: JSON.stringify({ messaging_product: "whatsapp", recipient_type: "individual", to: input.to, ...content }),
+  });
+  const waMessageId = body.messages?.[0]?.id;
+  if (!waMessageId) throw new WhatsAppSendError("WhatsApp did not return a message id", undefined, false);
+  return { waMessageId, dryRun: false };
+}
+
 /** Uploads a file to WhatsApp and returns its media id (valid for 30 days). */
 export async function uploadMedia(input: { phoneNumberId?: string; buffer: Buffer; mimeType: string; filename: string }): Promise<string> {
   if (isWhatsAppDryRun()) {
